@@ -2,6 +2,7 @@ import os
 import sqlite3
 import uuid
 from typing import List
+import json
 from cryptography.fernet import Fernet
 from backend.models import Tenant
 import logging
@@ -54,6 +55,15 @@ class TenantManager:
              cursor.execute("ALTER TABLE tenants ADD COLUMN encrypted_paypal_token TEXT")
         except sqlite3.OperationalError:
              pass # Column likely exists
+
+        # Migration for mappings settings
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN deposit_mapping TEXT")
+             cursor.execute("ALTER TABLE tenants ADD COLUMN refund_mapping TEXT")
+             cursor.execute("ALTER TABLE tenants ADD COLUMN auto_fix BOOLEAN")
+        except sqlite3.OperationalError:
+             pass # Columns likely exist
+             
         conn.commit()
         conn.close()
 
@@ -93,7 +103,7 @@ class TenantManager:
     def list_tenants(self) -> List[Tenant]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id FROM tenants")
+        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, deposit_mapping, refund_mapping, auto_fix FROM tenants")
         rows = cursor.fetchall()
         conn.close()
         
@@ -105,7 +115,10 @@ class TenantManager:
                 encrypted_shopify_token=r[4],
                 encrypted_paypal_token=r[5],
                 encrypted_qbo_token=r[6], 
-                qbo_realm_id=r[7]
+                qbo_realm_id=r[7],
+                deposit_account_mapping=json.loads(r[8]) if r[8] else {},
+                refund_account_mapping=r[9] if r[9] else "returns",
+                auto_fix_variances=bool(r[10]) if r[10] is not None else False
             ) 
             for r in rows
         ]
@@ -141,3 +154,14 @@ class TenantManager:
         if not encrypted_token:
             return None
         return self.cipher.decrypt(encrypted_token.encode()).decode()
+
+    def update_settings(self, tenant_id: str, deposit_map: dict, refund_map: str, auto_fix: bool):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE tenants 
+            SET deposit_mapping = ?, refund_mapping = ?, auto_fix = ?
+            WHERE id = ?
+        """, (json.dumps(deposit_map), refund_map, auto_fix, tenant_id))
+        conn.commit()
+        conn.close()

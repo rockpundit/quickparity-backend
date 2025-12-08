@@ -101,4 +101,9 @@ class Tenant(BaseModel):
     alert_email: Optional[str] = None
     last_sync_at: Optional[datetime] = None
     
+    # Account Mapping & Rules
+    deposit_account_mapping: dict = {} # Map[Source, AccountType] e.g. {'Stripe': 'undeposited'}
+    refund_account_mapping: Optional[str] = "returns" # 'sales' or 'returns'
+    auto_fix_variances: bool = False
+    
     model_config = ConfigDict(arbitrary_types_allowed=True)

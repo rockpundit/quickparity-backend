@@ -62,32 +62,44 @@ class QBOClient:
 
         raise Exception("QBO Max Retries Exceeded")
 
-    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime) -> Optional[LedgerEntry]:
+    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None) -> Optional[LedgerEntry]:
         """
         Find a deposit matching the net amount within a date range.
-        QBO Query: SELECT * FROM Deposit WHERE TxnDate >= '...' AND TxnDate <= '...'
+        Optional: Filter by target_account_type ('checking', 'undeposited')
         """
-        # QBO amounts are numerical.
-        # Note: QBO might not allow filtering by Amount directly in all endpoints or it might be inefficient.
-        # But 'Deposit' entity supports filtering.
         
         formatted_date_from = date_from.strftime("%Y-%m-%d")
         formatted_date_to = date_to.strftime("%Y-%m-%d")
         
-        query = f"SELECT * FROM Deposit WHERE TxnDate >= '{formatted_date_from}' AND TxnDate <= '{formatted_date_to}'"
-        
+        # Query generic Deposit
         query = f"SELECT * FROM Deposit WHERE TxnDate >= '{formatted_date_from}' AND TxnDate <= '{formatted_date_to}'"
         
         data = await self._query(query)
         deposits = data.get("QueryResponse", {}).get("Deposit", [])
         
-        # Filter in memory for exact amount match to avoid float issues in query string if any
-        # QBO amount is often string in JSON "100.00"
-        
         for dep in deposits:
             dep_amount = Decimal(str(dep.get("TotalAmt", 0)))
             if dep_amount == amount:
-                # Found a candidate
+                
+                # Check Account Mapping if specified
+                if target_account_type:
+                    account_ref = dep.get("DepositToAccountRef", {})
+                    acct_name = account_ref.get("name", "").lower()
+                    
+                    # Logic: "undeposited" implies we shouldn't find a Deposit object normally? 
+                    # If the user selects "Undeposited Funds", they might be expecting the funds to BE in Undeposited Funds.
+                    # But the Payout from Stripe MOVES it from Undeposited -> Bank.
+                    # So actually, if target is "Undeposited Funds", we might be looking appropriately for a Deposit that CREDITS Undeposited Funds ??
+                    # No, the "Deposits To" label usually means "Where does the money LAND?".
+                    # If Stripe lands in Checking, we look for Deposit into Checking.
+                    # If user says "Deposits To: Undeposited Funds" (maybe standard for PayPal?), then we look for Deposit into Undeposited Funds.
+                    
+                    # Simple heuristic Name check (flawed but effective for simple fix)
+                    if target_account_type == "checking" and "checking" not in acct_name:
+                         continue # Skip if not checking
+                    if target_account_type == "undeposited" and "undeposited" not in acct_name:
+                         continue
+                
                 return self._parse_ledger_entry(dep)
         
         return None

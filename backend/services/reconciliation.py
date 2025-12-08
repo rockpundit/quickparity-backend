@@ -81,7 +81,7 @@ class ReconciliationEngine:
         conn.commit()
         conn.close()
 
-    async def run_for_period(self, start_date: datetime, end_date: datetime, auto_fix: bool = False):
+    async def run_for_period(self, start_date: datetime, end_date: datetime, auto_fix: bool = False, tenant_settings: dict = None):
         payouts = await self.square.get_payouts(begin_time=start_date, end_time=end_date)
         if self.stripe:
             stripe_payouts = await self.stripe.get_payouts(begin_time=start_date, end_time=end_date)
@@ -99,11 +99,11 @@ class ReconciliationEngine:
         
         results = []
         for payout in payouts:
-            result = await self.process_payout(payout, auto_fix)
+            result = await self.process_payout(payout, auto_fix, tenant_settings)
             results.append(result)
         return results
 
-    async def process_payout(self, payout: Payout, auto_fix: bool) -> ReconciliationEntry:
+    async def process_payout(self, payout: Payout, auto_fix: bool, tenant_settings: dict = None) -> ReconciliationEntry:
         logger.info(f"Processing Payout {payout.id} | Net: {payout.amount_money}")
 
         # 1. Fetch detailed Payout Entries to calculate Gross, Tax, and Fees
@@ -184,7 +184,15 @@ class ReconciliationEngine:
         # 3. Find QBO Deposit
         date_from = payout.created_at - timedelta(days=3)
         date_to = payout.created_at + timedelta(days=3)
-        ledger_entry = await self.qbo.find_deposit(payout.amount_money, date_from, date_to)
+        
+        # Determine target account from settings
+        target_account = None
+        if tenant_settings and "deposit_map" in tenant_settings:
+            # Payout source might be "Square", "Stripe" etc.
+            # Normalizing keys if needed, but keeping simple for now.
+            target_account = tenant_settings["deposit_map"].get(payout.source.lower())
+            
+        ledger_entry = await self.qbo.find_deposit(payout.amount_money, date_from, date_to, target_account_type=target_account)
 
         status = ReconciliationStatus.MATCHED
         ledger_fee = Decimal("0.00")
