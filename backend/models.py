@@ -14,6 +14,7 @@ class VarianceType(str, Enum):
     FEE_MISMATCH = "fee_mismatch"
     MISSING_TAX = "missing_tax"
     REFUND_DRIFT = "refund_drift"
+    INTERNATIONAL_FEE = "international_fee"
     OTHER = "other"
 
 class Payout(BaseModel):
@@ -69,6 +70,7 @@ class ReconciliationEntry(BaseModel):
     
     variance_amount: float
     variance_type: Optional[VarianceType] = None
+    variance_reason: Optional[str] = None # Plain English explanation for the variance
     
     # Metadata for UI
     source: str = "Square" # or Stripe
@@ -92,5 +94,11 @@ class Tenant(BaseModel):
     encrypted_paypal_token: Optional[str] = None
     encrypted_qbo_token: str
     qbo_realm_id: str
+
+    # Sync & Notification Settings
+    sync_frequency: str = "manual"  # manual, daily, weekly
+    email_notifications: bool = False
+    alert_email: Optional[str] = None
+    last_sync_at: Optional[datetime] = None
     
     model_config = ConfigDict(arbitrary_types_allowed=True)

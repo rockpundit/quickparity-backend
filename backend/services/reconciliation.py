@@ -43,9 +43,14 @@ class ReconciliationEngine:
                 refund_amount REAL,
                 refund_fee_reversal REAL,
                 variance_amount REAL,
-                variance_type TEXT
+                variance_type TEXT,
+                variance_reason TEXT
             )
         """)
+        try:
+             cursor.execute("ALTER TABLE audit_log ADD COLUMN variance_reason TEXT")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
         conn.commit()
         conn.close()
 
@@ -56,8 +61,8 @@ class ReconciliationEngine:
             INSERT OR REPLACE INTO audit_log (
                 payout_id, date, status, gross_sales, net_deposit, 
                 calculated_fees, ledger_fee, sales_tax_collected, 
-                refund_amount, refund_fee_reversal, variance_amount, variance_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                refund_amount, refund_fee_reversal, variance_amount, variance_type, variance_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             entry.payout_id,
             entry.date,
@@ -70,7 +75,8 @@ class ReconciliationEngine:
             float(entry.refund_amount),
             float(entry.refund_fee_reversal),
             float(entry.variance_amount),
-            entry.variance_type.value if entry.variance_type else None
+            entry.variance_type.value if entry.variance_type else None,
+            entry.variance_reason
         ))
         conn.commit()
         conn.close()
@@ -152,6 +158,20 @@ class ReconciliationEngine:
                 
             elif e_type == "FEE" or e_type == "ADJUSTMENT":
                 total_fees += abs(fee_amt) # If standalone fee
+                
+        # Aggregate Metadata for High Fidelity Analysis
+        metadata_agg = {"fee_descriptions": [], "card_brands": []}
+        for entry in entries:
+            meta = entry.get("metadata", {})
+            
+            # Stripe Fee Details
+            if "fee_details" in meta:
+                for fd in meta["fee_details"]:
+                    metadata_agg["fee_descriptions"].append(fd.get("description", ""))
+            
+            # Square Card Details
+            if "card_brand" in meta:
+                metadata_agg["card_brands"].append(meta["card_brand"])
 
         # Adjust total fees by reversals
         total_fees -= refund_fee_reversal
@@ -188,7 +208,9 @@ class ReconciliationEngine:
             if abs(fee_variance) > Decimal("0.01"):
                 status = ReconciliationStatus.VARIANCE_DETECTED
                 variance = fee_variance
-                v_type = VarianceType.FEE_MISMATCH
+                # Heuristic Analysis
+                v_type, v_reason = self._analyze_variance(fee_variance, total_gross_sales, total_tax, total_refunds, metadata_agg)
+                entry_reason = v_reason
         
         # Construct Entry
         entry = ReconciliationEntry(
@@ -203,7 +225,8 @@ class ReconciliationEngine:
             refund_amount=float(total_refunds),
             refund_fee_reversal=float(refund_fee_reversal),
             variance_amount=float(variance),
-            variance_type=v_type
+            variance_type=v_type,
+            variance_reason=entry_reason if status == ReconciliationStatus.VARIANCE_DETECTED else None
         )
         
         self._save_entry(entry)
@@ -252,4 +275,49 @@ class ReconciliationEngine:
             logger.info("Auto-fix applied.")
         except Exception as e:
             logger.error(f"Failed to auto-fix: {e}")
+
+
+    def _analyze_variance(self, variance: Decimal, gross_sales: Decimal, total_tax: Decimal, total_refunds: Decimal, metadata_agg: dict = None):
+        """
+        Heuristic engine to determine the root cause of a variance.
+        Prioritizes explicit metadata if available.
+        """
+        abs_var = abs(variance)
+        metadata_agg = metadata_agg or {}
+        
+        # 1. High Fidelity: Check Explicit Fee Details (Stripe)
+        # We aggregate all fee descriptions from all entries
+        fee_descriptions = metadata_agg.get("fee_descriptions", [])
+        for desc in fee_descriptions:
+            desc_lower = desc.lower()
+            if "international" in desc_lower or "cross-border" in desc_lower:
+                 return VarianceType.INTERNATIONAL_FEE, f"International Fee detected: {desc}"
+            if "tax" in desc_lower:
+                 # If explicit tax fee is found in fee details
+                 return VarianceType.MISSING_TAX, f"Tax Fee detected: {desc}"
+
+        # 2. High Fidelity: Check Card Details (Square)
+        # If card brand is AMEX and variance matches high fee?
+        # Or if we have "International" flags?
+        # Square API doesn't always give "International" explicit flag easily in basic card details,
+        # but if we had it, we'd check `metadata_agg.get("is_international")`.
+        # For now, we rely on heuristics if explicit text isn't found, 
+        # BUT we can confidently say "Amex Fee" if brand is Amex and variance aligns.
+        
+        # 3. Heuristic: Check for International Fee (approx 1% of gross)
+        # Tolerance of 0.05
+        intl_fee_est = gross_sales * Decimal("0.01")
+        if abs(abs_var - intl_fee_est) < Decimal("0.05"):
+             return VarianceType.INTERNATIONAL_FEE, "Missing International Transaction Fee (1%)"
+             
+        # 4. Check for Missing Tax
+        if abs(abs_var - total_tax) < Decimal("0.05"):
+             return VarianceType.MISSING_TAX, "Unrecorded State Tax Withholding"
+             
+        # 5. Check for Refund Drift
+        if total_refunds > 0 and abs(abs_var - total_refunds) < Decimal("0.05"):
+             return VarianceType.REFUND_DRIFT, "Refund not recorded in Ledger"
+             
+        # Default
+        return VarianceType.FEE_MISMATCH, "Processing Fee Discrepancy"
 

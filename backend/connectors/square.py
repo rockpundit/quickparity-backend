@@ -179,9 +179,24 @@ class SquareClient:
             # Square Payout Entry has 'type', 'fee', 'gross', 'amount_money', 'source_payment_id'.
             
             if entry.get("type") in ["CHARGE", "PAYMENT"] and entry.get("source_payment_id"):
-                 # Optional: fetch payment details for tax
-                 # payment_details = await self.get_payment(entry["source_payment_id"])
-                 # entry["tax_money"] = payment_details.get("tax_money")
+                 # Fetch payment details for card info (International, etc.)
+                 try:
+                     payment_id = entry["source_payment_id"]
+                     payment = await self._request("GET", f"/payments/{payment_id}")
+                     payment_data = payment.get("payment", {})
+                     card_details = payment_data.get("card_details", {}).get("card", {})
+                     
+                     entry["metadata"] = {
+                         "card_brand": card_details.get("card_brand"),
+                         "card_type": card_details.get("card_type"), # CREDT, DEBIT
+                         "prepaid_type": card_details.get("prepaid_type"),
+                         # Square doesn't always explicitly flag "International" in simple fields,
+                         # but card_brand / card_type help.
+                         # Real "International" flag depends on bin_data usually not fully exposed in standard scope.
+                         # But we store what we have.
+                     }
+                 except Exception as e:
+                     logger.warning(f"Could not fetch payment details for {entry.get('source_payment_id')}: {e}")
                  pass
 
             detailed.append(entry)

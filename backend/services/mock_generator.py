@@ -19,7 +19,9 @@ class MockDataGenerator:
             "PERFECT_MATCH", # Weighted to be common
             "FEE_MISMATCH",
             "MISSING_DEPOSIT",
-            "REFUND_DRIFT" # Refund timing issue
+            "REFUND_DRIFT", # Refund timing issue
+            "INTERNATIONAL_FEE",
+            "MISSING_TAX"
         ]
 
     def _random_money(self, min_val=10.0, max_val=1000.0) -> Decimal:
@@ -151,6 +153,54 @@ class MockDataGenerator:
                 id=f"txn_{uuid.uuid4().hex[:8]}",
                 txn_date=created_at + timedelta(days=2),
                 total_amount=net_deposit, # Original amount w/o refund
+                has_fee_line_item=True,
+                fee_amount=real_fee * -1
+            )
+            
+        elif scenario == "INTERNATIONAL_FEE":
+            # Extra 1% fee taken by processor
+            intl_fee = gross_sales * Decimal("0.01")
+            intl_fee = Decimal(str(round(intl_fee, 2)))
+            
+            # Payout Net is reduced by this extra fee
+            payout.amount_money -= intl_fee
+            
+            # Ledger Entry matches the REDUCED amount usually (if bank feed matches payout)
+            # BUT wait, the Variance is between "Calculated Fee" and "Ledger Fee"
+            # OR between "Calculated Net" and "Actual Net".
+            # The engine logic: 
+            #   Calculated Fees = 2.9% + 30c.
+            #   Ledger Fee = Bank says we paid X.
+            #   Variance = Calculated - Ledger.
+            
+            # So here: Ledger Fee should be HIGHER than standard.
+            
+            ledger_entry = LedgerEntry(
+                id=f"txn_{uuid.uuid4().hex[:8]}",
+                txn_date=created_at + timedelta(days=2),
+                total_amount=net_deposit - intl_fee,
+                has_fee_line_item=True,
+                fee_amount=(real_fee + intl_fee) * -1
+            )
+            
+        elif scenario == "MISSING_TAX":
+            # Tax was not withheld/payout out differently?
+            # Scenario: "Unrecorded State Tax"
+            # Payout Logic: Gross + Tax - Fee = Net.
+            # Variance triggers if Net matches (Gross - Fee). i.e. Tax is missing from the deposit.
+            # Or if the Ledger Entry is missing the tax component?
+            
+            # Let's say the Payout amount is LESS than expected by exactly the Tax amount.
+            # Expected Net: Gross + Tax - Fee.
+            # Actual Net: Gross - Fee (Tax wasn't passed through).
+            
+            payout.amount_money -= tax_amount
+            
+            # Ledger confirms this lower amount
+            ledger_entry = LedgerEntry(
+                id=f"txn_{uuid.uuid4().hex[:8]}",
+                txn_date=created_at + timedelta(days=2),
+                total_amount=net_deposit - tax_amount,
                 has_fee_line_item=True,
                 fee_amount=real_fee * -1
             )

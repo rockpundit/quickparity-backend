@@ -33,6 +33,9 @@ from typing import List
 
 from models import LedgerEntry, Payout, ReconciliationResult, ReconciliationStatus, Tenant
 
+from backend.services.scheduler import SchedulerService
+from backend.api.settings import router as settings_router
+
 # ... imports ...
 
 # Constants
@@ -257,6 +260,9 @@ def main():
     # Run Command
     run_parser = subparsers.add_parser("run", help="Run reconciliation for all tenants")
     
+    # Scheduler Command
+    scheduler_parser = subparsers.add_parser("scheduler", help="Run the background scheduler")
+    
     args = parser.parse_args()
     
     tm = TenantManager()
@@ -265,6 +271,14 @@ def main():
         tm.add_tenant(args.name, args.sq_token, args.qbo_token, args.qbo_realm)
     elif args.command == "run":
         asyncio.run(run_audit(tm))
+    elif args.command == "scheduler":
+        scheduler = SchedulerService(tm)
+        loop = asyncio.get_event_loop()
+        try:
+            loop.create_task(scheduler.start())
+            loop.run_forever()
+        except KeyboardInterrupt:
+            loop.run_until_complete(scheduler.stop())
     else:
         parser.print_help()
 

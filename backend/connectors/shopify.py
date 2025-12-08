@@ -1,5 +1,8 @@
 import logging
-import shopify
+try:
+    import shopify
+except ImportError:
+    shopify = None
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional

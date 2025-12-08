@@ -1,5 +1,8 @@
 import logging
-import stripe
+try:
+    import stripe
+except ImportError:
+    stripe = None
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -16,7 +19,10 @@ class StripeClient:
     
     def __init__(self, access_token: str):
         self.api_key = access_token
-        stripe.api_key = self.api_key
+        if stripe:
+            stripe.api_key = self.api_key
+        else:
+            logger.warning("Stripe library not installed.")
         # Note: stripe-python is synchronous by default, but has async support in newer versions.
         # However, for consistency with the codebase which is async, we can wrap calls or use 
         # stripe.HttpClient to be async. 
@@ -110,7 +116,14 @@ class StripeClient:
                     "fee_amount": Decimal(txn.fee) / 100,
                     "gross_amount": (Decimal(txn.amount) + Decimal(txn.fee)) / 100,
                     "currency": txn.currency.upper(),
-                    "source_id": txn.source
+                    "currency": txn.currency.upper(),
+                    "source_id": txn.source,
+                    "metadata": {
+                        "fee_details": [
+                            {"amount": float(fd.amount)/100, "description": fd.description, "type": fd.type} 
+                            for fd in getattr(txn, "fee_details", [])
+                        ]
+                    }
                 }
                 detailed.append(entry)
                 
