@@ -1,0 +1,143 @@
+import os
+import sqlite3
+import uuid
+from typing import List
+from cryptography.fernet import Fernet
+from backend.models import Tenant
+import logging
+
+logger = logging.getLogger(__name__)
+
+DB_PATH = "reconciliation.db"
+ENCRYPTION_KEY_ENV = "ENCRYPTION_KEY"
+
+class TenantManager:
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = db_path
+        self._init_db()
+        self.cipher = self._get_cipher()
+
+    def _get_cipher(self) -> Fernet:
+        key = os.getenv(ENCRYPTION_KEY_ENV)
+        if not key:
+            # Use a static key for dev convenience to ensure consistency across threads/restarts
+            # if the env var isn't set.
+            key = "kxskS9PbGTarlthp-4JyGZYh5YVJv1US6NRn0_sYGPo=" 
+            logger.warning(f"No {ENCRYPTION_KEY_ENV} found. Using static dev key.")
+        return Fernet(key.encode())
+
+    def _init_db(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Tenants table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tenants (
+                id TEXT PRIMARY KEY,
+                name TEXT UNIQUE,
+                encrypted_sq_token TEXT,
+                encrypted_stripe_token TEXT,
+                encrypted_shopify_token TEXT,
+                encrypted_paypal_token TEXT,
+                encrypted_qbo_token TEXT,
+                qbo_realm_id TEXT
+            )
+        """)
+        
+        # Simple migration for existing dev database
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN encrypted_shopify_token TEXT")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
+             
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN encrypted_paypal_token TEXT")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
+        conn.commit()
+        conn.close()
+
+    def add_tenant(self, name: str, sq_token: str, qbo_token: str, qbo_realm: str, stripe_token: str = None, shopify_token: str = None, paypal_token: str = None) -> Tenant:
+        encrypted_sq = self.cipher.encrypt(sq_token.encode()).decode()
+        encrypted_qbo = self.cipher.encrypt(qbo_token.encode()).decode()
+        encrypted_stripe = self.cipher.encrypt(stripe_token.encode()).decode() if stripe_token else None
+        encrypted_shopify = self.cipher.encrypt(shopify_token.encode()).decode() if shopify_token else None
+        encrypted_paypal = self.cipher.encrypt(paypal_token.encode()).decode() if paypal_token else None
+        
+        tenant_id = str(uuid.uuid4())
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO tenants (id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (tenant_id, name, encrypted_sq, encrypted_stripe, encrypted_shopify, encrypted_paypal, encrypted_qbo, qbo_realm))
+            conn.commit()
+            logger.info(f"Tenant '{name}' added successfully.")
+            return Tenant(
+                id=tenant_id,
+                name=name,
+                encrypted_sq_token=encrypted_sq,
+                encrypted_qbo_token=encrypted_qbo,
+                qbo_realm_id=qbo_realm,
+                encrypted_shopify_token=encrypted_shopify,
+                encrypted_paypal_token=encrypted_paypal
+            )
+        except sqlite3.IntegrityError:
+            logger.error(f"Tenant '{name}' already exists.")
+            raise ValueError(f"Tenant '{name}' already exists.")
+        finally:
+            conn.close()
+
+    def list_tenants(self) -> List[Tenant]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id FROM tenants")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [
+            Tenant(
+                id=r[0], name=r[1], 
+                encrypted_sq_token=r[2], 
+                encrypted_stripe_token=r[3],
+                encrypted_shopify_token=r[4],
+                encrypted_paypal_token=r[5],
+                encrypted_qbo_token=r[6], 
+                qbo_realm_id=r[7]
+            ) 
+            for r in rows
+        ]
+        
+    
+    def update_tenant_token(self, tenant_id: str, token_type: str, token_value: str):
+        """
+        Updates a specific token for a tenant.
+        token_type: 'stripe', 'qbo', 'square'
+        """
+        encrypted_token = self.cipher.encrypt(token_value.encode()).decode()
+        
+        column_map = {
+            "stripe": "encrypted_stripe_token",
+            "qbo": "encrypted_qbo_token",
+            "square": "encrypted_sq_token",
+            "shopify": "encrypted_shopify_token",
+            "paypal": "encrypted_paypal_token"
+        }
+        
+        if token_type not in column_map:
+            raise ValueError(f"Invalid token type: {token_type}")
+            
+        column = column_map[token_type]
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(f"UPDATE tenants SET {column} = ? WHERE id = ?", (encrypted_token, tenant_id))
+        conn.commit()
+        conn.close()
+
+    def decrypt_token(self, encrypted_token: str) -> str:
+        if not encrypted_token:
+            return None
+        return self.cipher.decrypt(encrypted_token.encode()).decode()
