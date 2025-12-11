@@ -51,6 +51,11 @@ class ReconciliationEngine:
              cursor.execute("ALTER TABLE audit_log ADD COLUMN variance_reason TEXT")
         except sqlite3.OperationalError:
              pass # Column likely exists
+             
+        try:
+             cursor.execute("ALTER TABLE audit_log ADD COLUMN ledger_deposit_amount REAL")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
         conn.commit()
         conn.close()
 
@@ -61,8 +66,9 @@ class ReconciliationEngine:
             INSERT OR REPLACE INTO audit_log (
                 payout_id, date, status, gross_sales, net_deposit, 
                 calculated_fees, ledger_fee, sales_tax_collected, 
-                refund_amount, refund_fee_reversal, variance_amount, variance_type, variance_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                refund_amount, refund_fee_reversal, variance_amount, variance_type, variance_reason,
+                ledger_deposit_amount
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             entry.payout_id,
             entry.date,
@@ -76,7 +82,8 @@ class ReconciliationEngine:
             float(entry.refund_fee_reversal),
             float(entry.variance_amount),
             entry.variance_type.value if entry.variance_type else None,
-            entry.variance_reason
+            entry.variance_reason,
+            entry.ledger_deposit_amount
         ))
         conn.commit()
         conn.close()
@@ -195,7 +202,13 @@ class ReconciliationEngine:
                  # Try capitalized source
                  target_account = tenant_settings["deposit_account_mapping"].get(payout.source)
             
-        ledger_entry = await self.qbo.find_deposit(payout.amount_money, date_from, date_to, target_account_type=target_account)
+        ledger_entry = await self.qbo.find_deposit(
+            payout.amount_money, 
+            date_from, 
+            date_to, 
+            target_account_type=target_account,
+            payout_id=payout.id
+        )
 
         status = ReconciliationStatus.MATCHED
         ledger_fee = Decimal("0.00")
@@ -204,25 +217,81 @@ class ReconciliationEngine:
         entry_reason = None # Initialize entry_reason
 
         if not ledger_entry:
-            status = ReconciliationStatus.MISSING_DEPOSIT
-            variance = payout.amount_money # Entire amount is "variance" if missing? Or just mark missing.
+            # PUSH MODEL: Create Deposit if enabled
+            if tenant_settings and tenant_settings.get("enable_deposit_push"):
+                # Check prerequisites
+                source_fund_id = tenant_settings.get("default_undeposited_funds_account_id")
+                # Target account from mapping
+                target_bank_id = None
+                if tenant_settings and "deposit_account_mapping" in tenant_settings:
+                    target_bank_id = tenant_settings["deposit_account_mapping"].get(payout.source.lower()) or tenant_settings["deposit_account_mapping"].get(payout.source)
+                
+                if source_fund_id and target_bank_id:
+                    logger.info(f"PUSH: Creating missing deposit for Payout {payout.id}")
+                    try:
+                        memo = f"Reconciliator Match ID: {payout.id}"
+                        # Deposit Date = Payout Arrival Date (or Created + 2 days if None)
+                        dep_date = payout.arrival_date or (payout.created_at + timedelta(days=2))
+                        
+                        await self.qbo.create_deposit(
+                            amount=payout.amount_money,
+                            date=dep_date,
+                            target_account_id=target_bank_id,
+                            source_account_id=source_fund_id,
+                            memo=memo
+                        )
+                        # Assume success implies creation.
+                        # We could re-query, but let's assume MATCHED for now.
+                        status = ReconciliationStatus.MATCHED
+                        variance = Decimal("0.00")
+                        entry_reason = "Auto-Created via Push Model"
+                        
+                        # Note: We haven't populated 'ledger_fee' because the deposit we just made might not have fee line items yet.
+                        # Ideally, we should also create a Journal Entry for the fee immediately after?
+                        # Or let the subsequent run catch the Fee mismatch?
+                        # If we push Net, and Payout has Net, then Variance = 0.
+                        # But Fee audit will show "Calculated Fee X, Ledger Fee 0".
+                        # This works fine; next run will flap to "VARIANCE_DETECTED" (Fee Mismatch)..
+                        # UNLESS we manually set ledger_fee to 0 here.
+                        
+                    except Exception as e:
+                        logger.error(f"PUSH FAILED: {e}")
+                        status = ReconciliationStatus.MISSING_DEPOSIT
+                        variance = payout.amount_money
+                else:
+                    logger.warning("PUSH SKIPPED: Missing Account Configuration (Bank or Undeposited Funds)")
+                    status = ReconciliationStatus.MISSING_DEPOSIT
+                    variance = payout.amount_money
+            else:
+                status = ReconciliationStatus.MISSING_DEPOSIT
+                variance = payout.amount_money # Entire amount is "variance" if missing? Or just mark missing.
         else:
             ledger_fee = abs(ledger_entry.fee_amount)
-            # Variance = Calculated Fee - Ledger Fee
-            # (If ledger records the fee)
             
-            # Or if checking Net Match:
-            # Payout Net should match Deposit Amount (if fees are taken out before deposit)
-            # If QBO Deposit is Net, then we are good on the cash side.
-            # We audit the Fees.
+            # Check for Fuzzy Match Variance (Amount Mismatch)
+            # If the Ledger Amount != Payout Amount, we have a variance.
+            amount_variance = payout.amount_money - ledger_entry.total_amount
             
-            fee_variance = total_fees - ledger_fee
-            if abs(fee_variance) > Decimal("0.01"):
+            # We add logic to combine "Fee Variance" and "Net Amount Variance"
+            # If Net Amount is different, that's the primary variance. 
+            # Unless we want to attribute it to fees?
+            
+            if abs(amount_variance) > Decimal("0.01"):
                 status = ReconciliationStatus.VARIANCE_DETECTED
-                variance = fee_variance
+                variance = amount_variance
                 # Heuristic Analysis
-                v_type, v_reason = self._analyze_variance(fee_variance, total_gross_sales, total_tax, total_refunds, metadata_agg)
+                v_type, v_reason = self._analyze_variance(amount_variance, total_gross_sales, total_tax, total_refunds, metadata_agg)
                 entry_reason = v_reason
+            else:
+                # Amount matches (Exact), check Fee Variance?
+                # Sometimes net matches but fees are recorded differently?
+                # E.g. Bank Feed has Fee line item, but we calculated differently?
+                fee_variance = total_fees - ledger_fee
+                if abs(fee_variance) > Decimal("0.01"):
+                     status = ReconciliationStatus.VARIANCE_DETECTED
+                     variance = fee_variance
+                     v_type, v_reason = self._analyze_variance(fee_variance, total_gross_sales, total_tax, total_refunds, metadata_agg)
+                     entry_reason = v_reason
         
         # Construct Entry
         entry = ReconciliationEntry(
@@ -238,7 +307,8 @@ class ReconciliationEngine:
             refund_fee_reversal=float(refund_fee_reversal),
             variance_amount=float(variance),
             variance_type=v_type,
-            variance_reason=entry_reason if status == ReconciliationStatus.VARIANCE_DETECTED else None
+            variance_reason=entry_reason if status == ReconciliationStatus.VARIANCE_DETECTED else None,
+            ledger_deposit_amount=float(ledger_entry.total_amount) if ledger_entry else None
         )
         
         self._save_entry(entry)

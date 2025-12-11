@@ -173,26 +173,50 @@ class SimulatedQBOClient(SimulatedBaseClient):
     async def close(self):
         pass
 
-    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None) -> Optional[LedgerEntry]:
+    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None, payout_id: str = None) -> Optional[LedgerEntry]:
         # Scan the universe of Ledger Entries
-        # Inefficnet O(N) but fine for simulation
+        # Ineeficent O(N) but fine for simulation
         
         await asyncio.sleep(0.05)
+        
+        best_fuzzy_match = None
+        exact_match = None
+        TOLERANCE = Decimal("10.00")
         
         for ledger in self.ledger_map.values():
             if not ledger:
                 continue
             
-            # Match Amount
-            # Note: Ledger Amount might not be exactly equal to Payout Net if there is a variance scenario
-            # But the 'find_deposit' logic usually looks for exact match or potential partial match?
-            # Standard logic: Exact Match on Amount.
+            # Note: The Simulated LedgerEntry doesn't currently have a 'memo' field modeled in the Pydantic model explicitly
+            # but we can assume checking ID presence if we were to extend it.
+            # For now, let's just focus on the Amount logic which is the main simulator issue.
+            # If we wanted to simulate ID matching, we'd need to add 'memo' to LedgerEntry model.
             
+            # Date check (loose)
+            if not (date_from <= ledger.txn_date <= date_to):
+                continue
+
+            # 1. Pseudo-ID Match (since we don't have memo in simulated model yet, skip or assume false)
+            # In a real scenario, we'd check ledger.memo
+            
+            # 2. Exact Amount Match
             if ledger.total_amount == amount:
-                 # Date check (loose)
-                 if date_from <= ledger.txn_date <= date_to:
-                     return ledger
-                     
+                exact_match = ledger
+                # Continue to see if we find others, but exact is good.
+                continue
+            
+            # 3. Fuzzy Match
+            diff = abs(ledger.total_amount - amount)
+            if diff <= TOLERANCE:
+                if not best_fuzzy_match or diff < abs(best_fuzzy_match.total_amount - amount):
+                    best_fuzzy_match = ledger
+                    
+        if exact_match:
+            return exact_match
+            
+        if best_fuzzy_match:
+            return best_fuzzy_match
+            
         return None
 
     async def create_journal_entry(self, deposit_id: str, variance_amount: Decimal, idempotency_key: str):
@@ -204,4 +228,39 @@ class SimulatedQBOClient(SimulatedBaseClient):
             "created_at": datetime.now()
         })
         return {"Id": f"je_sim_{len(self.journal_entries)}"}
+
+    async def create_deposit(self, amount: Decimal, date: datetime, target_account_id: str, source_account_id: str, memo: str):
+        logger.info(f"SIMULATION: Creating Deposit {amount} with memo {memo}")
+        
+        # Extract Payout ID from memo if possible? 
+        # Memo format: "Reconciliator Match ID: {payout.id}"
+        
+        # Create Simulated Ledger Entry
+        new_id = f"dep_sim_{len(self.ledger_map)}"
+        
+        # For simulation, we need to add this to the ledger_map so find_deposit sees it?
+        # But wait, find_deposit iterates over `self.ledger_map.values()`.
+        # So we just add it to a new key.
+        
+        entry = LedgerEntry(
+            id=new_id,
+            txn_date=date,
+            total_amount=amount,
+            has_fee_line_item=False, # Standard deposits usually don't have fee line items if simple push?
+            # Or if we push Net, it's net.
+            fee_amount=Decimal("0.00")
+        )
+        # Store strict memo if we can expand model later, but for now just storing entry.
+        # However, to test ID matching, we relied on 'ledger.memo' check in simulated `find_deposit`.
+        # I previously updated simulated `find_deposit` to look for pseudo-ID match but commented it out 
+        # because the model lacks `PrivateNote`.
+        # I should probably update `LedgerEntry` model in models.py to include `memo` / `private_note` for this to fully work in simulation?
+        # Yes, I should update LedgerEntry model first.
+        
+        # ACTUALLY, I'll update the LedgerEntry model in a separate step or just mock it here by sticking an attribute on.
+        entry.private_note = memo # Monkey patch for simulation test
+        
+        self.ledger_map[new_id] = entry
+        
+        return {"Id": new_id}
 

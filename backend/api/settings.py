@@ -35,5 +35,5 @@ async def update_settings(settings: SettingsUpdate, tm: TenantManager = Depends(
         raise HTTPException(status_code=404, detail="No tenant found")
     
     t = tenants[0]
-    tm.update_settings(t.id, settings.sync_frequency, settings.email_notifications, settings.alert_email)
+    tm.update_notification_settings(t.id, settings.sync_frequency, settings.email_notifications, settings.alert_email)
     return {"status": "success"}

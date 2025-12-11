@@ -3,6 +3,7 @@ import sqlite3
 import uuid
 from typing import List
 import json
+from datetime import datetime
 from cryptography.fernet import Fernet
 from backend.models import Tenant
 import logging
@@ -73,6 +74,24 @@ class TenantManager:
              cursor.execute("ALTER TABLE tenants ADD COLUMN subscription_tier TEXT DEFAULT 'free'")
         except sqlite3.OperationalError:
              pass # Column likely exists
+
+        # Migrations for sync settings
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN sync_frequency TEXT DEFAULT 'manual'")
+        except sqlite3.OperationalError:
+             pass
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN email_notifications BOOLEAN DEFAULT 0")
+        except sqlite3.OperationalError:
+             pass
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN alert_email TEXT")
+        except sqlite3.OperationalError:
+             pass
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN last_sync_at TIMESTAMP")
+        except sqlite3.OperationalError:
+             pass
              
         conn.commit()
         conn.close()
@@ -116,7 +135,7 @@ class TenantManager:
     def list_tenants(self) -> List[Tenant]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, deposit_mapping, refund_mapping, auto_fix, encrypted_qbo_refresh_token, subscription_tier FROM tenants")
+        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, deposit_mapping, refund_mapping, auto_fix, encrypted_qbo_refresh_token, subscription_tier, sync_frequency, email_notifications, alert_email, last_sync_at FROM tenants")
         rows = cursor.fetchall()
         conn.close()
         
@@ -133,7 +152,11 @@ class TenantManager:
                 refund_account_mapping=r[9] if r[9] else "returns",
                 auto_fix_variances=bool(r[10]) if r[10] is not None else False,
                 encrypted_qbo_refresh_token=r[11] if len(r) > 11 else None,
-                subscription_tier=r[12] if len(r) > 12 and r[12] else "free"
+                subscription_tier=r[12] if len(r) > 12 and r[12] else "free",
+                sync_frequency=r[13] if len(r) > 13 and r[13] else "manual",
+                email_notifications=bool(r[14]) if len(r) > 14 and r[14] is not None else False,
+                alert_email=r[15] if len(r) > 15 else None,
+                last_sync_at=datetime.fromisoformat(r[16]) if len(r) > 16 and r[16] else None
             ) 
             for r in rows
         ]
@@ -179,5 +202,27 @@ class TenantManager:
             SET deposit_mapping = ?, refund_mapping = ?, auto_fix = ?
             WHERE id = ?
         """, (json.dumps(deposit_map), refund_map, auto_fix, tenant_id))
+        conn.commit()
+        conn.close()
+
+    def update_notification_settings(self, tenant_id: str, sync_frequency: str, email_notifications: bool, alert_email: str):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE tenants 
+            SET sync_frequency = ?, email_notifications = ?, alert_email = ?
+            WHERE id = ?
+        """, (sync_frequency, email_notifications, alert_email, tenant_id))
+        conn.commit()
+        conn.close()
+        
+    def update_last_sync(self, tenant_id: str, last_sync: datetime):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE tenants 
+            SET last_sync_at = ?
+            WHERE id = ?
+        """, (last_sync.isoformat(), tenant_id))
         conn.commit()
         conn.close()

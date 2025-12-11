@@ -45,6 +45,7 @@ class LedgerEntry(BaseModel):
     currency: str = "USD"
     has_fee_line_item: bool = False
     fee_amount: Decimal = Decimal("0.00")
+    private_note: Optional[str] = None
     
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -62,6 +63,7 @@ class ReconciliationEntry(BaseModel):
     net_deposit: float
     calculated_fees: float
     ledger_fee: float
+    ledger_deposit_amount: Optional[float] = None
     
     # New Fields for Features 1 & 2
     sales_tax_collected: float
@@ -110,6 +112,7 @@ class Tenant(BaseModel):
     # Variance Fix Settings
     default_fee_account_id: Optional[str] = None
     default_undeposited_funds_account_id: Optional[str] = None
+    enable_deposit_push: bool = False # Feature: "Push" Model (Create Deposit if missing)
     
     # Subscription Settings
     subscription_tier: str = "free" # 'free' or 'paid'

@@ -62,10 +62,12 @@ class QBOClient:
 
         raise Exception("QBO Max Retries Exceeded")
 
-    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None) -> Optional[LedgerEntry]:
+    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None, payout_id: str = None) -> Optional[LedgerEntry]:
         """
-        Find a deposit matching the net amount within a date range.
-        Optional: Filter by target_account_type ('checking', 'undeposited')
+        Find a deposit using a multi-tiered strategy:
+        1. ID Match: Checks 'PrivateNote' for the payout_id (Winner).
+        2. Exact Match: Matches exact amount (Runner-up).
+        3. Fuzzy Match: Matches amount within tolerance (Fallback).
         """
         
         formatted_date_from = date_from.strftime("%Y-%m-%d")
@@ -77,20 +79,50 @@ class QBOClient:
         data = await self._query(query)
         deposits = data.get("QueryResponse", {}).get("Deposit", [])
         
+        best_fuzzy_match = None
+        exact_match = None
+        
+        # Tolerance for fuzzy matching (e.g. $10.00)
+        # In the future, this could be configurable per tenant
+        TOLERANCE = Decimal("10.00")
+        
         for dep in deposits:
-            dep_amount = Decimal(str(dep.get("TotalAmt", 0)))
-            if dep_amount == amount:
-                
-                # Check Account Mapping if specified
-                if target_account_type:
-                    account_ref = dep.get("DepositToAccountRef", {})
-                    acct_name = account_ref.get("name", "").lower()
-                    
-                    # Strict check against user configuration
-                    if target_account_type.lower() not in acct_name:
-                         continue
-                
+            # 1. Deterministic ID Match (Prioritize this over account filter)
+            memo = dep.get("PrivateNote", "")
+            if payout_id and payout_id in memo:
+                logger.info(f"Deterministic ID Match found for {payout_id}")
                 return self._parse_ledger_entry(dep)
+
+            # Check Account Mapping if specified
+            if target_account_type:
+                account_ref = dep.get("DepositToAccountRef", {})
+                acct_name = account_ref.get("name", "").lower()
+                # Only filter if we HAVE a name and it doesn't match
+                if acct_name and target_account_type.lower() not in acct_name:
+                     continue
+
+            dep_amount = Decimal(str(dep.get("TotalAmt", 0)))
+            
+            # 2. Exact Match
+            if dep_amount == amount:
+                # We store it but keep looking in case there is an ID match later (which we check first now, so this is just "unmatched ID exact match")
+                if not exact_match:
+                    exact_match = dep
+                continue
+            
+            # 3. Fuzzy Match
+            diff = abs(dep_amount - amount)
+            if diff <= TOLERANCE:
+                # Store the closest match
+                if not best_fuzzy_match or diff < abs(Decimal(str(best_fuzzy_match.get("TotalAmt", 0))) - amount):
+                    best_fuzzy_match = dep
+        
+        if exact_match:
+            return self._parse_ledger_entry(exact_match)
+            
+        if best_fuzzy_match:
+            logger.info(f"Fuzzy Match found for {amount} (Actual: {best_fuzzy_match.get('TotalAmt')})")
+            return self._parse_ledger_entry(best_fuzzy_match)
         
         return None
 
@@ -149,11 +181,40 @@ class QBOClient:
             "DocNumber": f"ADJ-{idempotency_key[:8]}"
         }
         
-        # In a real implementation, we would pass 'requestid' query param for idempotency if QBO supports it,
-        # or rely on DocNumber uniqueness.
+        response = await self.client.post(endpoint, json=payload)
+        response.raise_for_status()
+        return response.json()
+
+    async def create_deposit(self, amount: Decimal, date: datetime, target_account_id: str, source_account_id: str, memo: str):
+        """
+        Create a Deposit transaction in QBO.
+        Target Account: The Bank Account (Checking).
+        Source Account: Where the money comes from (Undeposited Funds).
+        """
+        endpoint = "/deposit"
         
-        # or rely on DocNumber uniqueness.
+        formatted_date = date.strftime("%Y-%m-%d")
         
+        payload = {
+            "TxnDate": formatted_date,
+            "PrivateNote": memo, 
+            "DepositToAccountRef": {
+                "value": target_account_id
+            },
+            "Line": [
+                {
+                    "DetailType": "DepositLineDetail",
+                    "Amount": float(amount),
+                    "DepositLineDetail": {
+                        "AccountRef": {
+                            "value": source_account_id
+                        }
+                    }
+                }
+            ]
+        }
+        
+        logger.info(f"Creating QBO Deposit: {amount} to {target_account_id} from {source_account_id}")
         response = await self.client.post(endpoint, json=payload)
         response.raise_for_status()
         return response.json()

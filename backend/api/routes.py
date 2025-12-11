@@ -293,7 +293,10 @@ async def get_payouts():
             refund_amount=row["refund_amount"],
             refund_fee_reversal=row["refund_fee_reversal"],
             variance_amount=row["variance_amount"],
-            variance_type=row["variance_type"]
+            variance_amount=row["variance_amount"],
+            variance_type=row["variance_type"],
+            variance_reason=row["variance_reason"],
+            ledger_deposit_amount=row["ledger_deposit_amount"]
         )
         entries.append(entry)
         total_variance += abs(entry.variance_amount)
