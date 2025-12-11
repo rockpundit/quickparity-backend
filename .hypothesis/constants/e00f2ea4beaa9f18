@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/connectors/stripe.py
+# hypothesis_version: 6.148.7
+
+[100, 'Stripe', 'amount', 'created', 'currency', 'description', 'fee_amount', 'fee_details', 'gross_amount', 'gte', 'limit', 'lte', 'metadata', 'net_amount', 'paid', 'source_id', 'status', 'type']

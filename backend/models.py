@@ -93,6 +93,7 @@ class Tenant(BaseModel):
     encrypted_shopify_token: Optional[str] = None
     encrypted_paypal_token: Optional[str] = None
     encrypted_qbo_token: str
+    encrypted_qbo_refresh_token: Optional[str] = None
     qbo_realm_id: str
 
     # Sync & Notification Settings
@@ -105,5 +106,12 @@ class Tenant(BaseModel):
     deposit_account_mapping: dict = {} # Map[Source, AccountType] e.g. {'Stripe': 'undeposited'}
     refund_account_mapping: Optional[str] = "returns" # 'sales' or 'returns'
     auto_fix_variances: bool = False
+    
+    # Variance Fix Settings
+    default_fee_account_id: Optional[str] = None
+    default_undeposited_funds_account_id: Optional[str] = None
+    
+    # Subscription Settings
+    subscription_tier: str = "free" # 'free' or 'paid'
     
     model_config = ConfigDict(arbitrary_types_allowed=True)

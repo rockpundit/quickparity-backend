@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/connectors/simulated.py
+# hypothesis_version: 6.148.7
+
+[0.05, 0.1, 'CHARGE', 'Id', 'ORDER', 'PAID', 'PayPal', 'SUCCESS', 'Shopify', 'Square', 'Stripe', 'created_at', 'currency', 'deposit_id', 'fee_amount', 'gross_amount', 'key', 'net_amount', 'paid', 'sim_charge_123', 'sim_pay_sq', 'source_id', 'source_payment_id', 'type', 'variance']

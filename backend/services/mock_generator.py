@@ -12,16 +12,27 @@ class MockDataGenerator:
     """
     
     def __init__(self):
-        self.sources = ["Square", "Stripe", "Shopify", "PayPal"]
-        self.variance_scenarios = [
+        self.sources = ["Square", "Stripe"] # Deactivated: "Shopify", "PayPal"
+        # Define Scenarios and Weights
+        self.scenarios = [
             "PERFECT_MATCH",
-            "PERFECT_MATCH", 
-            "PERFECT_MATCH", # Weighted to be common
             "FEE_MISMATCH",
             "MISSING_DEPOSIT",
-            "REFUND_DRIFT", # Refund timing issue
+            "REFUND_DRIFT",
             "INTERNATIONAL_FEE",
             "MISSING_TAX"
+        ]
+        # Weights (Sum = 1.0)
+        # Perfect Match: 85%
+        # Missing Deposit: 4% (Real world scenario < 5%)
+        # Others: ~11% distributed
+        self.weights = [
+            0.95,  # PERFECT_MATCH
+            0.01,  # FEE_MISMATCH
+            0.03,  # MISSING_DEPOSIT
+            0.005, # REFUND_DRIFT
+            0.0025, # INTERNATIONAL_FEE
+            0.0025  # MISSING_TAX
         ]
 
     def _random_money(self, min_val=10.0, max_val=1000.0) -> Decimal:
@@ -36,7 +47,8 @@ class MockDataGenerator:
             source = random.choice(self.sources)
         
         if not scenario:
-            scenario = random.choice(self.variance_scenarios)
+            # Weighted Random Selection
+            scenario = random.choices(self.scenarios, weights=self.weights, k=1)[0]
 
         now = datetime.now()
         # Randomize time in the last 30 days

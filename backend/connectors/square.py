@@ -16,16 +16,18 @@ class SquareClient:
     Async client for Square API with rate limiting handling.
     """
     BASE_URL = "https://connect.squareup.com/v2"
+    SANDBOX_URL = "https://connect.squareupsandbox.com/v2"
 
-    def __init__(self, access_token: str):
+    def __init__(self, access_token: str, environment: str = "production"):
         self.access_token = access_token
+        self.base_url = self.SANDBOX_URL if environment == "sandbox" else self.BASE_URL
         self.headers = {
             "Authorization": f"Bearer {self.access_token}",
             "Content-Type": "application/json",
             "Square-Version": "2023-10-20", # Pin a recent API version
         }
         self.client = httpx.AsyncClient(
-            base_url=self.BASE_URL,
+            base_url=self.base_url,
             headers=self.headers,
             timeout=30.0
         )
@@ -76,12 +78,16 @@ class SquareClient:
         endpoint = "/payouts"
         params = {"status": status}
         if begin_time:
-            params["begin_time"] = begin_time.isoformat()
+            # Ensure UTC/Z format if naive
+            if begin_time.tzinfo is None:
+                params["begin_time"] = begin_time.isoformat() + "Z"
+            else:
+                params["begin_time"] = begin_time.isoformat()
         if end_time:
-            params["end_time"] = end_time.isoformat()
-
-        if end_time:
-            params["end_time"] = end_time.isoformat()
+            if end_time.tzinfo is None:
+                params["end_time"] = end_time.isoformat() + "Z"
+            else:
+                params["end_time"] = end_time.isoformat()
 
         # Simple pagination loop could be added here if needed, Square uses 'cursor'
         # For simplicity in this demo, fetching first page. 

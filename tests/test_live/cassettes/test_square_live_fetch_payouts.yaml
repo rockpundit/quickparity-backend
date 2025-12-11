@@ -1,0 +1,68 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Host:
+      - connect.squareupsandbox.com
+      User-Agent:
+      - python-httpx/0.28.1
+    method: GET
+    uri: https://connect.squareupsandbox.com/v2/payouts?begin_time=2025-09-11T04%3A56%3A01.649443Z&end_time=2025-12-10T04%3A56%3A01.649443Z&status=PAID
+  response:
+    body:
+      string: '{}
+
+        '
+    headers:
+      CF-Cache-Status:
+      - DYNAMIC
+      CF-Ray:
+      - 9abbdeb7291e72ad-EWR
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '3'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 10 Dec 2025 09:56:02 GMT
+      Server:
+      - cloudflare
+      Set-Cookie:
+      - __cf_bm=J.8vKdHDScM3WvYOtSr_IFT8UYDJi.nyAB1nIedWvdw-1765360562-1.0.1.1-BetvN9oIxC4RgZl5.AnxG7rvD9pgNtXYrx93ArrvQ8XRLbOYNMpayX97Iv79dcp7ZEr03Izsx3tUgBvKrRehKZp4g1wPcODZZUOlX1ES87g;
+        path=/; expires=Wed, 10-Dec-25 10:26:02 GMT; domain=.squareupsandbox.com;
+        HttpOnly; Secure; SameSite=None
+      Strict-Transport-Security:
+      - max-age=631152000; includeSubDomains; preload
+      Vary:
+      - Accept-Encoding
+      frame-options:
+      - DENY
+      square-version:
+      - '2023-10-20'
+      squareup--connect--v2--common--versionmetadata-bin:
+      - CgoyMDIzLTEwLTIw
+      x-content-type-options:
+      - nosniff
+      x-envoy-decorator-operation:
+      - /v2/payouts/**
+      x-frame-options:
+      - DENY
+      x-sq-dc:
+      - aws
+      x-sq-region:
+      - us-west-2
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -173,7 +173,7 @@ class SimulatedQBOClient(SimulatedBaseClient):
     async def close(self):
         pass
 
-    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime) -> Optional[LedgerEntry]:
+    async def find_deposit(self, amount: Decimal, date_from: datetime, date_to: datetime, target_account_type: str = None) -> Optional[LedgerEntry]:
         # Scan the universe of Ledger Entries
         # Inefficnet O(N) but fine for simulation
         

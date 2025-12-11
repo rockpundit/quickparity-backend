@@ -81,7 +81,7 @@ class ReconciliationEngine:
         conn.commit()
         conn.close()
 
-    async def run_for_period(self, start_date: datetime, end_date: datetime, auto_fix: bool = False, tenant_settings: dict = None):
+    async def run_for_period(self, start_date: datetime, end_date: datetime, tenant_settings: dict = None):
         payouts = await self.square.get_payouts(begin_time=start_date, end_time=end_date)
         if self.stripe:
             stripe_payouts = await self.stripe.get_payouts(begin_time=start_date, end_time=end_date)
@@ -99,11 +99,11 @@ class ReconciliationEngine:
         
         results = []
         for payout in payouts:
-            result = await self.process_payout(payout, auto_fix, tenant_settings)
+            result = await self.process_payout(payout, tenant_settings)
             results.append(result)
         return results
 
-    async def process_payout(self, payout: Payout, auto_fix: bool, tenant_settings: dict = None) -> ReconciliationEntry:
+    async def process_payout(self, payout: Payout, tenant_settings: dict = None) -> ReconciliationEntry:
         logger.info(f"Processing Payout {payout.id} | Net: {payout.amount_money}")
 
         # 1. Fetch detailed Payout Entries to calculate Gross, Tax, and Fees
@@ -187,10 +187,13 @@ class ReconciliationEngine:
         
         # Determine target account from settings
         target_account = None
-        if tenant_settings and "deposit_map" in tenant_settings:
+        if tenant_settings and "deposit_account_mapping" in tenant_settings:
             # Payout source might be "Square", "Stripe" etc.
             # Normalizing keys if needed, but keeping simple for now.
-            target_account = tenant_settings["deposit_map"].get(payout.source.lower())
+            target_account = tenant_settings["deposit_account_mapping"].get(payout.source.lower())
+            if not target_account:
+                 # Try capitalized source
+                 target_account = tenant_settings["deposit_account_mapping"].get(payout.source)
             
         ledger_entry = await self.qbo.find_deposit(payout.amount_money, date_from, date_to, target_account_type=target_account)
 
@@ -198,6 +201,7 @@ class ReconciliationEngine:
         ledger_fee = Decimal("0.00")
         variance = Decimal("0.00")
         v_type = None
+        entry_reason = None # Initialize entry_reason
 
         if not ledger_entry:
             status = ReconciliationStatus.MISSING_DEPOSIT
@@ -248,41 +252,81 @@ class ReconciliationEngine:
         }
         logger.info(f"Processed Payout Result: {entry_summary_for_log}")
 
-        if status == ReconciliationStatus.VARIANCE_DETECTED and auto_fix:
-            await self._auto_fix(entry, ledger_entry)
+        # Removed auto-fix logic
             
         return entry
 
-    async def _auto_fix(self, entry: ReconciliationEntry, ledger_entry: Optional[LedgerEntry]):
-        if not ledger_entry:
-            logger.warning("Cannot auto-fix without a ledger entry (deposit).")
-            return
+    async def apply_fix(self, entry: ReconciliationEntry, tenant_settings: dict = None):
+        """
+        Public method to manually trigger the fix for a variance.
+        """
+        if entry.status != ReconciliationStatus.VARIANCE_DETECTED and entry.status != ReconciliationStatus.MISSING_DEPOSIT:
+             logger.warning(f"Cannot fix entry with status {entry.status}")
+             return False, "Entry is not in a variance state."
+
+        # Fetch the payout again to get fresh context if needed, or rely on passed entry.
+        # But we need the Ledger Entry to post questions against.
+        # Since ReconciliationEntry doesn't store Ledger Entry ID, we might need to find it again
+        # OR better: Store ledger_entry_id in ReconciliationEntry?
+        # For now, let's re-find the ledger entry quickly.
+        
+        # We need the dates to find the deposit again.
+        # This is slightly inefficient but safe.
+        p_date = datetime.strptime(entry.date, "%Y-%m-%d")
+        date_from = p_date - timedelta(days=3)
+        date_to = p_date + timedelta(days=3)
+        
+        # Need payout amount. ReconciliationEntry has net_deposit.
+        amount = Decimal(str(entry.net_deposit))
+        
+        target_account = None
+        target_account = None
+        if tenant_settings and "deposit_account_mapping" in tenant_settings:
+             target_account = tenant_settings["deposit_account_mapping"].get(entry.source.lower()) or tenant_settings["deposit_account_mapping"].get(entry.source)
             
-        logger.info(f"Auto-fixing variance for Payout {entry.payout_id}...")
+        ledger_entry = await self.qbo.find_deposit(amount, date_from, date_to, target_account_type=target_account)
+        
+        if not ledger_entry:
+            return False, "Could not find underlying QBO Deposit to fix."
+            
+        logger.info(f"Applying fix for Payout {entry.payout_id}...")
         import hashlib
         idempotency_key = hashlib.sha256(entry.payout_id.encode()).hexdigest()
         
+        # Get Account IDs from settings
+        fee_account_id = tenant_settings.get("default_fee_account_id")
+        undep_funds_id = tenant_settings.get("default_undeposited_funds_account_id")
+        
+        if not fee_account_id or not undep_funds_id:
+             return False, "Tenant configuration missing default Fee or Undeposited Funds account."
+
         try:
-            # Call QBO to creating Journal Entry
-            # We need to handle Tax Liability separation here too if requested?
-            # "Journal Entry Output: Credit Sales Revenue, Credit Sales Tax Payable, Debit Fees, Debit Undeposited Funds"
-            
-            # This logic depends on how the user records the initial Sale.
-            # If they use "Undeposited Funds" for the Gross Sale, then we just need to relieve Undeposited Funds.
-            
             await self.qbo.create_journal_entry(
                 deposit_id=ledger_entry.id,
                 variance_amount=Decimal(str(entry.variance_amount)),
-                idempotency_key=idempotency_key
+                idempotency_key=idempotency_key,
+                fee_account_id=fee_account_id,
+                undeposited_funds_account_id=undep_funds_id
             )
-            # Note: We might need a more complex create_journal_entry_for_tax method
-            # if we want to book the Tax Liability specifically.
-            # The user requirement says "Journal Entry Output..." for Feature A.
-            # This implies we are creating the JE for the Payout processing.
             
-            logger.info("Auto-fix applied.")
+            # Update status in DB
+            entry.status = "FIXED" # Updating object
+            # Update DB
+            self._update_entry_status(entry.payout_id, "FIXED")
+            
+            logger.info("Fix applied successfully.")
+            return True, "Variance fixed."
+            
         except Exception as e:
-            logger.error(f"Failed to auto-fix: {e}")
+            logger.error(f"Failed to apply fix: {e}")
+            return False, str(e)
+
+    def _update_entry_status(self, payout_id: str, new_status: str):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE audit_log SET status = ? WHERE payout_id = ?", (new_status, payout_id))
+        conn.commit()
+        conn.close()
 
 
     def _analyze_variance(self, variance: Decimal, gross_sales: Decimal, total_tax: Decimal, total_refunds: Decimal, metadata_agg: dict = None):
@@ -316,15 +360,15 @@ class ReconciliationEngine:
         # Tolerance of 0.05
         intl_fee_est = gross_sales * Decimal("0.01")
         if abs(abs_var - intl_fee_est) < Decimal("0.05"):
-             return VarianceType.INTERNATIONAL_FEE, "Missing International Transaction Fee (1%)"
+             return VarianceType.INTERNATIONAL_FEE, "Likely Hidden International Fee (1% variance match)"
              
         # 4. Check for Missing Tax
         if abs(abs_var - total_tax) < Decimal("0.05"):
-             return VarianceType.MISSING_TAX, "Unrecorded State Tax Withholding"
+             return VarianceType.MISSING_TAX, "Likely Unrecorded Tax Withholding"
              
         # 5. Check for Refund Drift
         if total_refunds > 0 and abs(abs_var - total_refunds) < Decimal("0.05"):
-             return VarianceType.REFUND_DRIFT, "Refund not recorded in Ledger"
+             return VarianceType.REFUND_DRIFT, "Likely Refund Drift (Timing Difference)"
              
         # Default
         return VarianceType.FEE_MISMATCH, "Processing Fee Discrepancy"

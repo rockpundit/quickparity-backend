@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/connectors/qbo.py
+# hypothesis_version: 6.148.7
+
+[30.0, 429, '%Y-%m-%d', '/journalentry', '/query', '0.00', '123', '456', 'Accept', 'AccountRef', 'Amount', 'Authorization', 'Content-Type', 'Credit', 'Debit', 'Deposit', 'DepositToAccountRef', 'Description', 'DetailType', 'DocNumber', 'Id', 'Line', 'PostingType', 'QueryResponse', 'TotalAmt', 'TxnDate', 'application/json', 'checking', 'name', 'query', 'undeposited', 'value']

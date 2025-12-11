@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/services/scheduler.py
+# hypothesis_version: 6.148.7
+
+['daily', 'manual', 'weekly']

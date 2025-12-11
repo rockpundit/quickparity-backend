@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/connectors/square.py
+# hypothesis_version: 6.148.7
+
+[30.0, 100, 429, '%Y-%m-%d', '+00:00', '/payouts', '2023-10-20', 'ADJUSTMENT', 'Authorization', 'CHARGE', 'Content-Type', 'FEE', 'GET', 'PAID', 'PAYMENT', 'PROCESSING_FEE', 'Retry-After', 'Square-Version', 'Z', 'amount', 'amount_money', 'application/json', 'arrival_date', 'begin_time', 'card', 'card_brand', 'card_details', 'card_type', 'created_at', 'end_time', 'gross_amount_money', 'id', 'metadata', 'payment', 'payout_entries', 'payouts', 'prepaid_type', 'production', 'sandbox', 'source_payment_id', 'status', 'type']

@@ -76,7 +76,9 @@ class SchedulerService:
                     # This is where existing code reuse matters.
                     # We will signal "sync needed" or try to run it.
                     # Given the Complexity, we'll try to run it.
-                    from backend.main import run_audit
+                    # Logic to run engine
+                    # This is where existing code reuse matters.
+
                     
                     # Update last sync FIRST to prevent double run on error
                     # In real DB, transaction needed.
@@ -89,7 +91,7 @@ class SchedulerService:
                     # We need the engine logic.
                     
                     # Let's import ReconciliationEngine, SquareClient, QBOClient
-                    from backend.main import ReconciliationEngine
+                    from backend.services.reconciliation import ReconciliationEngine
                     from backend.connectors.square import SquareClient
                     from backend.connectors.qbo import QBOClient
                     

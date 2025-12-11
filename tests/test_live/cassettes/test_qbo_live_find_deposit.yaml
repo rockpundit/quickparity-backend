@@ -1,0 +1,65 @@
+interactions:
+- request:
+    body: ''
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Host:
+      - sandbox-quickbooks.api.intuit.com
+      User-Agent:
+      - python-httpx/0.28.1
+    method: GET
+    uri: https://sandbox-quickbooks.api.intuit.com/v3/company/9341455894883387/query?query=SELECT+%2A+FROM+Deposit+WHERE+TxnDate+%3E%3D+%272025-11-10%27+AND+TxnDate+%3C%3D+%272025-12-10%27
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAAL1WTW/iMBT8K8jngGwnDmluFC6V2m4L4VTtwQruEpHYUexURBX/fd9LKfQDKBu1
+        e8LY88bPnhnDM7mvVdVMlS2NtorEz2SiSmMzR+KH3TgxozQ1tXZT9YiQJ5nXgCW+IB7RssDxeKnS
+        Vab/kI1HxtIuL2W6QuyRynBfOZNPUGexcFQglsSc0gGlHrlRhQHEjdGq6TnTs3toYpzMRwWAozAa
+        MOGRhSlkpgF+f/kL2G0pKzzRo8yt8sjVAlYYZ7Aya3SamJVCLCW4i5MT6SQ2OK6UdCrJ2s445aLP
+        WJ/5CfNjSmMR9mkEAyi6ltbNywWAF1+isd21hi3ew4BlXFeV0mnz4Xrms8n+fuY6g016Mwf1tjcx
+        eS4rpLzOtGpV2t0aDwdD0S6soKu1blfhsz37xZC0bSRNiax3sikUVLVzSNWCoNffG29PGYR0ENCj
+        lEEHyuhF2sOMjIVdKNkJyouoAyPnJ7uk7ExO7zVCODsBn2U56rwtAOMtzeKD9pxsNliI9HK9q9lg
+        ex3zuM9KQKP2XOdkhfJOWeHo/oDGPjsnK5/Qh7PCvzsrbHsRhwX2f1Zf70Wd27qA76EQKPkb8/n0
+        lPl8/v96EwE8mD/nRs6i9sE6w41hNzOyhAkI85lm/IQ+bEb27WYMTgkevH+4ZzJXdqpSlZVfvWLD
+        6MTvgR/9C20HM7FjDxnMWScrd4d8mYG2mEcKuYZ/IXXuLATAIw5NMt7mAe7MvZWK9xlNKIuFiIU/
+        4AF9lesvrh2gNs8IAAA=
+    headers:
+      Connection:
+      - keep-alive
+      Content-Encoding:
+      - gzip
+      Content-Length:
+      - '584'
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 10 Dec 2025 09:55:53 GMT
+      Server:
+      - istio-envoy
+      Strict-Transport-Security:
+      - max-age=31536000
+      X-Content-Type-Options:
+      - nosniff
+      intuit_tid:
+      - 1-693943a8-3f1753252b337777054b8211
+      x-amzn-trace-id:
+      - Root=1-693943a8-3f1753252b337777054b8211
+      x-envoy-decorator-operation:
+      - v3-facade-service-desired-service.dev-devx-v3facadeservice-usw2-stg-ids.svc.cluster.local:8090/*
+      x-envoy-upstream-service-time:
+      - '1226'
+      x-request-id:
+      - 1-693943a8-3f1753252b337777054b8211
+      x-spanid:
+      - 9e97546c-3041-72dd-1daf-bf0f1cec15d3
+    status:
+      code: 200
+      message: OK
+version: 1

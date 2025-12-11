@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/connectors/shopify.py
+# hypothesis_version: 6.148.7
+
+['%Y-%m-%d', '2024-01', 'Shopify', 'date_max', 'date_min', 'fee_amount', 'gross_amount', 'mock_shopify_token', 'net_amount', 'paid', 'status', 'type']

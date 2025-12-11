@@ -67,12 +67,16 @@ async def test_high_volume_simulation():
         end_date = datetime.now()
         start_date = end_date - timedelta(days=60)
         
-        results = await engine.run_for_period(start_date, end_date, auto_fix=True)
+        results = await engine.run_for_period(start_date, end_date)
         
         # 3. Assertions
         matches = [r for r in results if r.status == ReconciliationStatus.MATCHED]
         variances = [r for r in results if r.status == ReconciliationStatus.VARIANCE_DETECTED]
         missing = [r for r in results if r.status == ReconciliationStatus.MISSING_DEPOSIT]
+        
+        # Manually trigger fixes for variances
+        for r in variances:
+             await engine.apply_fix(r)
         
         print(f"\nSimulation Results: {len(results)} Total")
         print(f"Matched: {len(matches)}")

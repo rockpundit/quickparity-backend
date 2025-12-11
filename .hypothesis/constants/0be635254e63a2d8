@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/api/routes.py
+# hypothesis_version: 6.148.7
+
+[0.0, 202, 400, 404, 500, '/payouts', '/reconcile', '/settings', 'DEMO_MODE', 'Demo Merchant', 'FIXED', 'MISSING_DEPOSIT', 'No tenants found', 'Settings saved', 'Square', 'Tenant not found', 'VARIANCE_DETECTED', 'calculated_fees', 'date', 'deposit_map', 'false', 'gross_sales', 'ledger_fee', 'message', 'mock_paypal_c_id', 'mock_paypal_secret', 'mock_qbo_token', 'mock_realm_id', 'mock_shopify_token', 'mock_sq_token', 'mock_stripe_token', 'net_deposit', 'payout_id', 'reconciliation.db', 'refund_amount', 'refund_fee_reversal', 'refund_map', 'returns', 'sales_tax_collected', 'status', 'tenant_id', 'true', 'variance_amount', 'variance_reason', 'variance_type']

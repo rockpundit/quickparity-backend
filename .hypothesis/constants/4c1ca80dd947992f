@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/services/reconciliation.py
+# hypothesis_version: 6.148.7
+
+['%Y-%m-%d', '0.00', '0.01', '0.05', 'ADJUSTMENT', 'CHARGE', 'FEE', 'FIXED', 'PAYMENT', 'PayPal', 'REFUND', 'Shopify', 'Square', 'Stripe', 'Variance fixed.', 'card_brand', 'card_brands', 'cross-border', 'deposit_map', 'description', 'fee_amount', 'fee_descriptions', 'fee_details', 'gross_amount', 'international', 'metadata', 'net', 'payout_id', 'reconciliation.db', 'refunds', 'status', 'tax', 'tax_amount', 'type']

@@ -64,15 +64,26 @@ class TenantManager:
         except sqlite3.OperationalError:
              pass # Columns likely exist
              
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN encrypted_qbo_refresh_token TEXT")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
+             
+        try:
+             cursor.execute("ALTER TABLE tenants ADD COLUMN subscription_tier TEXT DEFAULT 'free'")
+        except sqlite3.OperationalError:
+             pass # Column likely exists
+             
         conn.commit()
         conn.close()
 
-    def add_tenant(self, name: str, sq_token: str, qbo_token: str, qbo_realm: str, stripe_token: str = None, shopify_token: str = None, paypal_token: str = None) -> Tenant:
+    def add_tenant(self, name: str, sq_token: str, qbo_token: str, qbo_realm: str, stripe_token: str = None, shopify_token: str = None, paypal_token: str = None, qbo_refresh_token: str = None, subscription_tier: str = "free") -> Tenant:
         encrypted_sq = self.cipher.encrypt(sq_token.encode()).decode()
         encrypted_qbo = self.cipher.encrypt(qbo_token.encode()).decode()
         encrypted_stripe = self.cipher.encrypt(stripe_token.encode()).decode() if stripe_token else None
         encrypted_shopify = self.cipher.encrypt(shopify_token.encode()).decode() if shopify_token else None
         encrypted_paypal = self.cipher.encrypt(paypal_token.encode()).decode() if paypal_token else None
+        encrypted_qbo_refresh = self.cipher.encrypt(qbo_refresh_token.encode()).decode() if qbo_refresh_token else None
         
         tenant_id = str(uuid.uuid4())
         
@@ -80,9 +91,9 @@ class TenantManager:
         cursor = conn.cursor()
         try:
             cursor.execute("""
-                INSERT INTO tenants (id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (tenant_id, name, encrypted_sq, encrypted_stripe, encrypted_shopify, encrypted_paypal, encrypted_qbo, qbo_realm))
+                INSERT INTO tenants (id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, encrypted_qbo_refresh_token, subscription_tier)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (tenant_id, name, encrypted_sq, encrypted_stripe, encrypted_shopify, encrypted_paypal, encrypted_qbo, qbo_realm, encrypted_qbo_refresh, subscription_tier))
             conn.commit()
             logger.info(f"Tenant '{name}' added successfully.")
             return Tenant(
@@ -90,9 +101,11 @@ class TenantManager:
                 name=name,
                 encrypted_sq_token=encrypted_sq,
                 encrypted_qbo_token=encrypted_qbo,
+                encrypted_qbo_refresh_token=encrypted_qbo_refresh,
                 qbo_realm_id=qbo_realm,
                 encrypted_shopify_token=encrypted_shopify,
-                encrypted_paypal_token=encrypted_paypal
+                encrypted_paypal_token=encrypted_paypal,
+                subscription_tier=subscription_tier
             )
         except sqlite3.IntegrityError:
             logger.error(f"Tenant '{name}' already exists.")
@@ -103,7 +116,7 @@ class TenantManager:
     def list_tenants(self) -> List[Tenant]:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, deposit_mapping, refund_mapping, auto_fix FROM tenants")
+        cursor.execute("SELECT id, name, encrypted_sq_token, encrypted_stripe_token, encrypted_shopify_token, encrypted_paypal_token, encrypted_qbo_token, qbo_realm_id, deposit_mapping, refund_mapping, auto_fix, encrypted_qbo_refresh_token, subscription_tier FROM tenants")
         rows = cursor.fetchall()
         conn.close()
         
@@ -118,7 +131,9 @@ class TenantManager:
                 qbo_realm_id=r[7],
                 deposit_account_mapping=json.loads(r[8]) if r[8] else {},
                 refund_account_mapping=r[9] if r[9] else "returns",
-                auto_fix_variances=bool(r[10]) if r[10] is not None else False
+                auto_fix_variances=bool(r[10]) if r[10] is not None else False,
+                encrypted_qbo_refresh_token=r[11] if len(r) > 11 else None,
+                subscription_tier=r[12] if len(r) > 12 and r[12] else "free"
             ) 
             for r in rows
         ]
@@ -134,6 +149,7 @@ class TenantManager:
         column_map = {
             "stripe": "encrypted_stripe_token",
             "qbo": "encrypted_qbo_token",
+            "qbo_refresh": "encrypted_qbo_refresh_token",
             "square": "encrypted_sq_token",
             "shopify": "encrypted_shopify_token",
             "paypal": "encrypted_paypal_token"

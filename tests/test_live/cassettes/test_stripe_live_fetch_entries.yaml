@@ -1,0 +1,68 @@
+interactions:
+- request:
+    body: null
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Stripe-Version:
+      - 2025-11-17.clover
+      User-Agent:
+      - Stripe/v1 PythonBindings/14.0.1
+      X-Stripe-Client-User-Agent:
+      - '{"bindings_version": "14.0.1", "lang": "python", "publisher": "stripe", "httplib":
+        "requests", "lang_version": "3.13.7", "platform": "macOS-26.1-arm64-arm-64bit-Mach-O",
+        "uname": "Darwin Saads-MacBook-Air.local 25.1.0 Darwin Kernel Version 25.1.0:
+        Mon Oct 20 19:32:47 PDT 2025; root:xnu-12377.41.6~2/RELEASE_ARM64_T8103 arm64
+        arm"}'
+    method: GET
+    uri: https://api.stripe.com/v1/payouts?created%5Bgte%5D=1757580953&created%5Blte%5D=1765360553&limit=100&status=paid
+  response:
+    body:
+      string: "{\n  \"error\": {\n    \"message\": \"Invalid API Key provided: mk_1Sciu***************x0Q1\",\n
+        \   \"type\": \"invalid_request_error\"\n  }\n}\n"
+    headers:
+      Access-Control-Allow-Credentials:
+      - 'true'
+      Access-Control-Allow-Methods:
+      - GET, HEAD, PUT, PATCH, POST, DELETE
+      Access-Control-Allow-Origin:
+      - '*'
+      Access-Control-Expose-Headers:
+      - Request-Id, Stripe-Manage-Version, Stripe-Should-Retry, X-Stripe-External-Auth-Required,
+        X-Stripe-Privileged-Session-Required
+      Access-Control-Max-Age:
+      - '300'
+      Cache-Control:
+      - no-cache, no-store
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '129'
+      Content-Security-Policy:
+      - base-uri 'none'; default-src 'none'; form-action 'none'; frame-ancestors 'none';
+        img-src 'self'; script-src 'self' 'report-sample'; style-src 'self'; worker-src
+        'none'; upgrade-insecure-requests; report-uri https://q.stripe.com/csp-violation?q=38Yqluz6xF62-V9o2ShCusvdO1jpkEa-8SO7tEeLCA5leQdZcuJADpPMNQBgV-obHgbH2s5fa5Ow87S-
+      Content-Type:
+      - application/json
+      Date:
+      - Wed, 10 Dec 2025 09:55:53 GMT
+      Server:
+      - nginx
+      Strict-Transport-Security:
+      - max-age=63072000; includeSubDomains; preload
+      Vary:
+      - Origin
+      Www-Authenticate:
+      - Bearer realm="Stripe"
+      X-Robots-Tag:
+      - none
+      X-Wc:
+      - ABHIJ
+    status:
+      code: 401
+      message: Unauthorized
+version: 1

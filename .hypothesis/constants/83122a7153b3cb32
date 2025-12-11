@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/models.py
+# hypothesis_version: 6.148.7
+
+['0.00', 'CHARGE', 'ERROR', 'MATCHED', 'MISSING_DEPOSIT', 'Square', 'USD', 'VARIANCE_DETECTED', 'fee_mismatch', 'international_fee', 'manual', 'missing_tax', 'other', 'refund_drift', 'returns']

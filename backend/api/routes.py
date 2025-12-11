@@ -1,4 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import StreamingResponse
+import pandas as pd
+from io import BytesIO
 from typing import List, Optional
 from datetime import datetime, timedelta
 
@@ -106,7 +109,6 @@ async def run_reconciliation_task(tenant_id: str):
         await engine.run_for_period(
             start_date, 
             end_date, 
-            auto_fix=tenant.auto_fix_variances, 
             tenant_settings=tenant_settings
         )
         
@@ -148,6 +150,109 @@ async def trigger_reconciliation(background_tasks: BackgroundTasks, tenant_id: O
     
     background_tasks.add_task(run_reconciliation_task, target_tenant.id)
     return {"message": "Reconciliation started", "tenant_id": target_tenant.id}
+
+@router.post("/reconciliation/fix/{payout_id}")
+async def apply_fix_endpoint(payout_id: str, tenant_id: Optional[str] = None):
+    """
+    Manually apply a fix for a specific variance.
+    """
+    import sqlite3
+    
+    # 1. Fetch Tenant & Setup Engine (Code Duplication here, should be refactored into dependency but keeping inline for speed)
+    tm = TenantManager()
+    
+    if tenant_id:
+        tenants = [t for t in tm.list_tenants() if t.id == tenant_id]
+        tenant = tenants[0] if tenants else None
+    else:
+        # Default to first tenant
+        tenants = tm.list_tenants()
+        tenant = tenants[0] if tenants else None
+        
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    try:
+        # Decrypt tokens (Simplified setup similar to run_task)
+        sq_token = tm.decrypt_token(tenant.encrypted_sq_token)
+        qbo_token = tm.decrypt_token(tenant.encrypted_qbo_token)
+        stripe_token = "mock_stripe_token" # Placeholder
+        shopify_token = "mock_shopify_token"
+        paypal_client_id = "mock_paypal_c_id"
+        paypal_secret = "mock_paypal_secret"
+        
+        if os.getenv("DEMO_MODE", "false").lower() == "true":
+             # Demo Mode Setup
+             generator = MockDataGenerator()
+             shared_ledger_map = {}
+             sq_client = SimulatedSquareClient(generator)
+             stripe_client = SimulatedStripeClient(generator)
+             shopify_client = SimulatedShopifyClient(generator)
+             paypal_client = SimulatedPayPalClient(generator)
+             
+             # Re-populate ledger map just to be safe, though ideally persistence is better
+             # In a real app we query QBO. In simulation, we need the "simulated QBO" to find the deposit.
+             # If we create new instances of Simulated Clients, their state is empty unless they share a generator/singleton.
+             # MockDataGenerator is likely creating fresh data.
+             # For this task, we assume the simulated components allow finding past data or we rely on the `find_deposit` mock logic.
+             
+             shared_ledger_map.update(sq_client.ledger_map)
+             shared_ledger_map.update(stripe_client.ledger_map)
+             qbo_client = SimulatedQBOClient(generator, shared_ledger_map)
+        else:
+            sq_client = SquareClient(access_token=sq_token)
+            stripe_client = StripeClient(access_token=stripe_token)
+            shopify_client = ShopifyClient(shop_url="mock-shop.myshopify.com", access_token=shopify_token)
+            paypal_client = PayPalClient(client_id=paypal_client_id, client_secret=paypal_secret)
+            qbo_client = QBOClient(realm_id=tenant.qbo_realm_id, access_token=qbo_token)
+            
+        engine = ReconciliationEngine(sq_client, qbo_client, stripe_client, shopify_client, paypal_client)
+        
+        # 2. Fetch Entry from DB
+        conn = sqlite3.connect("reconciliation.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM audit_log WHERE payout_id = ?", (payout_id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Payout entry not found in audit log")
+            
+        entry = ReconciliationEntry(
+            date=row["date"],
+            payout_id=row["payout_id"],
+            status=row["status"],
+            gross_sales=row["gross_sales"],
+            net_deposit=row["net_deposit"],
+            calculated_fees=row["calculated_fees"],
+            ledger_fee=row["ledger_fee"],
+            sales_tax_collected=row["sales_tax_collected"],
+            refund_amount=row["refund_amount"],
+            refund_fee_reversal=row["refund_fee_reversal"],
+            variance_amount=row["variance_amount"],
+            variance_type=row["variance_type"],
+            variance_reason=row["variance_reason"],
+            source="Square" # TODO: Persist source in DB
+        )
+
+        tenant_settings = {
+            "deposit_map": tenant.deposit_account_mapping,
+            "refund_map": tenant.refund_account_mapping
+        }
+        
+        success, message = await engine.apply_fix(entry, tenant_settings)
+        
+        if success:
+            return {"message": "Fix applied successfully", "status": "FIXED"}
+        else:
+            raise HTTPException(status_code=400, detail=message)
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/payouts", response_model=AuditReport)
 async def get_payouts():
@@ -242,3 +347,57 @@ async def save_settings(payload: SettingsPayload):
     # For now, let's just focus on the requested features (Mappings).
     
     return {"message": "Settings saved"}
+
+@router.get("/tenant/status")
+async def get_tenant_status(tenant_id: Optional[str] = None):
+    tm = TenantManager()
+    if tenant_id:
+        tenants = [t for t in tm.list_tenants() if t.id == tenant_id]
+        tenant = tenants[0] if tenants else None
+    else:
+        tenants = tm.list_tenants()
+        tenant = tenants[0] if tenants else None
+    
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+        
+    return {"subscription_tier": tenant.subscription_tier}
+
+@router.get("/reconciliation/export")
+async def export_reconciliation(tenant_id: Optional[str] = None):
+    tm = TenantManager()
+    if tenant_id:
+        tenants = [t for t in tm.list_tenants() if t.id == tenant_id]
+        tenant = tenants[0] if tenants else None
+    else:
+        tenants = tm.list_tenants()
+        tenant = tenants[0] if tenants else None
+        
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+        
+    if tenant.subscription_tier != "paid":
+        raise HTTPException(status_code=403, detail="Export is only available for paid subscribers")
+        
+    import sqlite3
+    conn = sqlite3.connect("reconciliation.db")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM audit_log ORDER BY date DESC LIMIT 1000")
+    rows = cursor.fetchall()
+    conn.close()
+    
+    data = [dict(row) for row in rows]
+    df = pd.DataFrame(data)
+    
+    stream = BytesIO()
+    with pd.ExcelWriter(stream, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Reconciliation')
+    
+    stream.seek(0)
+    
+    headers = {
+        'Content-Disposition': 'attachment; filename="reconciliation_export.xlsx"'
+    }
+    
+    return StreamingResponse(stream, headers=headers, media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

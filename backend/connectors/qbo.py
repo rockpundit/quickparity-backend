@@ -86,18 +86,8 @@ class QBOClient:
                     account_ref = dep.get("DepositToAccountRef", {})
                     acct_name = account_ref.get("name", "").lower()
                     
-                    # Logic: "undeposited" implies we shouldn't find a Deposit object normally? 
-                    # If the user selects "Undeposited Funds", they might be expecting the funds to BE in Undeposited Funds.
-                    # But the Payout from Stripe MOVES it from Undeposited -> Bank.
-                    # So actually, if target is "Undeposited Funds", we might be looking appropriately for a Deposit that CREDITS Undeposited Funds ??
-                    # No, the "Deposits To" label usually means "Where does the money LAND?".
-                    # If Stripe lands in Checking, we look for Deposit into Checking.
-                    # If user says "Deposits To: Undeposited Funds" (maybe standard for PayPal?), then we look for Deposit into Undeposited Funds.
-                    
-                    # Simple heuristic Name check (flawed but effective for simple fix)
-                    if target_account_type == "checking" and "checking" not in acct_name:
-                         continue # Skip if not checking
-                    if target_account_type == "undeposited" and "undeposited" not in acct_name:
+                    # Strict check against user configuration
+                    if target_account_type.lower() not in acct_name:
                          continue
                 
                 return self._parse_ledger_entry(dep)
@@ -126,60 +116,15 @@ class QBOClient:
             fee_amount=fee_amt
         )
 
-    async def create_journal_entry(self, deposit_id: str, variance_amount: Decimal, idempotency_key: str):
+    async def create_journal_entry(self, deposit_id: str, variance_amount: Decimal, idempotency_key: str, fee_account_id: str, undeposited_funds_account_id: str):
         """
         Create a Journal Entry to fix the variance.
-        OR update the Deposit if that's the preferred method (DepositMod).
-        User requested: "Use DepositAdd (or DepositMod if it exists)."
-        Actually user said: "The Fix (Write Action): Use DepositAdd (or DepositMod if it exists)."
-        
-        However, modifying an existing Linked Txn (Deposit) can be complex if it was created by a feed.
-        Adding a Journal Entry is safer often, but the user specifically mentioned modifying the deposit:
-        "Line 1 (The Gross Sale): Positive Amount... Line 2 (The Fee): Negative Amount..."
-        
-        This implies modifying the Deposit to include the Fee line so the net matches.
-        
-        But wait, the problem is: "Payment processors deposit funds on a Net basis... but accounting ledgers record sales on a Gross basis."
-        Mismatched 'Undeposited Funds'.
-        
-        If we have a Deposit of $97 (Net) from Bank Feed, and Sales of $100 (Gross).
-        The Deposit should probably be split:
-        Source: Undeposited Funds $100
-        Deduction: Merchant Fees -$3
-        Net: $97.
-        
-        If the deposit exists as just $97 to Undeposited Funds, it leaves $3 in Undeposited Funds forever.
-        
-        So we need to mod the deposit to be:
-        Line 1: Undeposited Funds $100 (replacing the $97 line?)
-        Line 2: Fees -$3.
-        
-        Implementing DepositMod is tricky without full object.
-        For this simplified version, I will implement a `create_journal_entry` as a "Zero-Sum" plug if `DepositMod` is too risky given we don't have the full object state.
-        
-        BUT, the user prompt says: "Generate a 'Zero-Sum' reconciliation artifact (Journal Entry or Deposit Adjustment)".
-        And logic: "If auto_fix=True, create the Journal Entry to 'plug' the gap."
-        
-        So I will stick to creating a Journal Entry that debits "Merchant Fees" and Credits "Undeposited Funds" (to clear the remaining balance)?
-        
-        If Sales recorded $100 into Undeposited Funds.
-        Bank Deposit matched $97 from Undeposited Funds to Checking.
-        Remaining in Undeposited Funds: $3.
-        We need to move $3 from Undeposited Funds to Fees.
-        Credit Undeposited Funds $3.
-        Debit Merchant Fees $3.
-        
-        So this Journal Entry fixes it without touching the deposit!
-        This is much safer.
+        Uses explicit Account IDs provided by configuration.
         """
         
         endpoint = "/journalentry"
         # 1. Debit Merchant Fees (Expense)
         # 2. Credit Undeposited Funds (Asset)
-        
-        # We need Account IDs. For this demo, using placeholders.
-        FEE_ACCOUNT_ID = "123" # Merchant Service Fees
-        UNDEP_FUNDS_ACCOUNT_ID = "456" # Undeposited Funds
         
         payload = {
             "Line": [
@@ -187,7 +132,7 @@ class QBOClient:
                     "DetailType": "JournalEntryLineDetail",
                     "JournalEntryLineDetail": {
                         "PostingType": "Debit",
-                        "AccountRef": {"value": FEE_ACCOUNT_ID}
+                        "AccountRef": {"value": fee_account_id}
                     },
                     "Amount": float(abs(variance_amount)),
                     "Description": f"Fee Adjustment for Deposit {deposit_id}"
@@ -196,7 +141,7 @@ class QBOClient:
                     "DetailType": "JournalEntryLineDetail",
                     "JournalEntryLineDetail": {
                         "PostingType": "Credit",
-                        "AccountRef": {"value": UNDEP_FUNDS_ACCOUNT_ID}
+                        "AccountRef": {"value": undeposited_funds_account_id}
                     },
                     "Amount": float(abs(variance_amount))
                 }

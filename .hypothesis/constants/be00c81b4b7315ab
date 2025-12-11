@@ -1,0 +1,4 @@
+# file: /Users/saadfarhad/Reconciliator/backend/api/settings.py
+# hypothesis_version: 6.148.7
+
+[404, '/', '/settings', 'No tenant found', 'Settings', 'alert_email', 'email_notifications', 'last_sync_at', 'status', 'success', 'sync_frequency']

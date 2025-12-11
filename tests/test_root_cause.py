@@ -44,7 +44,8 @@ def test_detect_international_fee_heuristic_fallback():
     v_type, reason = engine._analyze_variance(variance, gross, Decimal("0.00"), Decimal("0.00"), {})
     
     assert v_type == VarianceType.INTERNATIONAL_FEE
-    assert "Missing International" in reason # Heuristic message
+    assert v_type == VarianceType.INTERNATIONAL_FEE
+    assert "Likely Hidden International Fee" in reason # Heuristic message
 
 def test_detect_missing_tax_heuristic_fallback():
     engine = ReconciliationEngine(MagicMock(), MagicMock(), db_path=":memory:")
@@ -55,4 +56,5 @@ def test_detect_missing_tax_heuristic_fallback():
     v_type, reason = engine._analyze_variance(variance, Decimal("100.00"), tax, Decimal("0.00"), {})
     
     assert v_type == VarianceType.MISSING_TAX
-    assert "Unrecorded State Tax" in reason
+    assert v_type == VarianceType.MISSING_TAX
+    assert "Likely Unrecorded Tax" in reason
