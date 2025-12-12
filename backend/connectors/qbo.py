@@ -148,15 +148,17 @@ class QBOClient:
             fee_amount=fee_amt
         )
 
-    async def create_journal_entry(self, deposit_id: str, variance_amount: Decimal, idempotency_key: str, fee_account_id: str, undeposited_funds_account_id: str):
+    async def create_journal_entry(self, deposit_id: str, variance_amount: Decimal, idempotency_key: str, expense_account_id: str, undeposited_funds_account_id: str, description: str = None):
         """
         Create a Journal Entry to fix the variance.
         Uses explicit Account IDs provided by configuration.
         """
         
         endpoint = "/journalentry"
-        # 1. Debit Merchant Fees (Expense)
+        # 1. Debit Merchant Fees/Tax (Expense/Liability)
         # 2. Credit Undeposited Funds (Asset)
+        
+        desc = description or f"Fee Adjustment for Deposit {deposit_id}"
         
         payload = {
             "Line": [
@@ -164,10 +166,10 @@ class QBOClient:
                     "DetailType": "JournalEntryLineDetail",
                     "JournalEntryLineDetail": {
                         "PostingType": "Debit",
-                        "AccountRef": {"value": fee_account_id}
+                        "AccountRef": {"value": expense_account_id}
                     },
                     "Amount": float(abs(variance_amount)),
-                    "Description": f"Fee Adjustment for Deposit {deposit_id}"
+                    "Description": desc
                 },
                 {
                     "DetailType": "JournalEntryLineDetail",
@@ -175,7 +177,8 @@ class QBOClient:
                         "PostingType": "Credit",
                         "AccountRef": {"value": undeposited_funds_account_id}
                     },
-                    "Amount": float(abs(variance_amount))
+                    "Amount": float(abs(variance_amount)),
+                    "Description": desc # consistent description
                 }
             ],
             "DocNumber": f"ADJ-{idempotency_key[:8]}"

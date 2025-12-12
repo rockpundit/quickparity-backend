@@ -189,8 +189,9 @@ class ReconciliationEngine:
         real_revenue = total_gross_sales - total_tax
 
         # 3. Find QBO Deposit
-        date_from = payout.created_at - timedelta(days=3)
-        date_to = payout.created_at + timedelta(days=3)
+        # Widened window to +/- 7 days to account for Timezone mismatches (UTC vs Local)
+        date_from = payout.created_at - timedelta(days=7)
+        date_to = payout.created_at + timedelta(days=7)
         
         # Determine target account from settings
         target_account = None
@@ -343,8 +344,10 @@ class ReconciliationEngine:
         # We need the dates to find the deposit again.
         # This is slightly inefficient but safe.
         p_date = datetime.strptime(entry.date, "%Y-%m-%d")
-        date_from = p_date - timedelta(days=3)
-        date_to = p_date + timedelta(days=3)
+        # 3. Find QBO Deposit
+        # Widened window to +/- 7 days to account for Timezone mismatches (UTC vs Local)
+        date_from = p_date - timedelta(days=7)
+        date_to = p_date + timedelta(days=7)
         
         # Need payout amount. ReconciliationEntry has net_deposit.
         amount = Decimal(str(entry.net_deposit))
@@ -366,17 +369,34 @@ class ReconciliationEngine:
         # Get Account IDs from settings
         fee_account_id = tenant_settings.get("default_fee_account_id")
         undep_funds_id = tenant_settings.get("default_undeposited_funds_account_id")
+        tax_account_id = tenant_settings.get("default_tax_account_id")
         
-        if not fee_account_id or not undep_funds_id:
-             return False, "Tenant configuration missing default Fee or Undeposited Funds account."
+        target_account_id = fee_account_id
+        description = f"Fee Adjustment for Deposit {ledger_entry.id}"
+        
+        # Determine specific account based on Variance Type
+        if entry.variance_type == VarianceType.MISSING_TAX:
+            if tax_account_id:
+                target_account_id = tax_account_id
+                description = f"Tax Withholding Adjustment for Deposit {ledger_entry.id}"
+            else:
+                logger.warning("Variance is MISSING_TAX but no default_tax_account_id configured. Falling back to Fee Account.")
+        
+        elif entry.variance_type == VarianceType.REFUND_DRIFT:
+             # Future: Use refund_account_mapping
+             description = f"Refund Adjustment for Deposit {ledger_entry.id}"
+
+        if not target_account_id or not undep_funds_id:
+             return False, "Tenant configuration missing default Fee/Tax or Undeposited Funds account."
 
         try:
             await self.qbo.create_journal_entry(
                 deposit_id=ledger_entry.id,
                 variance_amount=Decimal(str(entry.variance_amount)),
                 idempotency_key=idempotency_key,
-                fee_account_id=fee_account_id,
-                undeposited_funds_account_id=undep_funds_id
+                expense_account_id=target_account_id,
+                undeposited_funds_account_id=undep_funds_id,
+                description=description
             )
             
             # Update status in DB

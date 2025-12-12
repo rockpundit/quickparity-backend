@@ -112,6 +112,7 @@ class Tenant(BaseModel):
     # Variance Fix Settings
     default_fee_account_id: Optional[str] = None
     default_undeposited_funds_account_id: Optional[str] = None
+    default_tax_account_id: Optional[str] = None # Account for Tax Variances (e.g., Sales Tax Payable)
     enable_deposit_push: bool = False # Feature: "Push" Model (Create Deposit if missing)
     
     # Subscription Settings

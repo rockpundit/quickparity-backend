@@ -89,40 +89,51 @@ class SquareClient:
             else:
                 params["end_time"] = end_time.isoformat()
 
-        # Simple pagination loop could be added here if needed, Square uses 'cursor'
-        # For simplicity in this demo, fetching first page. 
-        # TODO: Implement full pagination.
-
-        data = await self._request("GET", endpoint, params=params)
-        payouts_data = data.get("payouts", [])
-        
+        # Pagination Loop
         payouts = []
-        for p_data in payouts_data:
-            try:
-                amount_money = Decimal(str(p_data["amount_money"]["amount"])) / 100
-                
-                # Fetch detailed fees
-                payout_id = p_data["id"]
-                fee_amount = await self.get_payout_fee(payout_id)
-                
-                created_at = datetime.fromisoformat(p_data["created_at"].replace("Z", "+00:00"))
-                arrival_date = None
-                if "arrival_date" in p_data:
-                     # Square returns YYYY-MM-DD
-                     arrival_date = datetime.strptime(p_data["arrival_date"], "%Y-%m-%d")
+        cursor = None
+        
+        while True:
+            if cursor:
+                params["cursor"] = cursor
+            
+            data = await self._request("GET", endpoint, params=params)
+            payouts_data = data.get("payouts", [])
+            
+            if not payouts_data:
+                break
 
-                payout = Payout(
-                    id=p_data["id"],
-                    status=p_data["status"],
-                    amount_money=amount_money,
-                    created_at=created_at,
-                    arrival_date=arrival_date,
-                    processing_fee=fee_amount
-                )
-                payouts.append(payout)
-            except (ValidationError, KeyError) as e:
-                logger.error(f"Error parsing payout {p_data.get('id')}: {e}")
-                continue
+            for p_data in payouts_data:
+                try:
+                    amount_money = Decimal(str(p_data["amount_money"]["amount"])) / 100
+                    
+                    # Fetch detailed fees
+                    payout_id = p_data["id"]
+                    fee_amount = await self.get_payout_fee(payout_id)
+                    
+                    created_at = datetime.fromisoformat(p_data["created_at"].replace("Z", "+00:00"))
+                    arrival_date = None
+                    if "arrival_date" in p_data:
+                         # Square returns YYYY-MM-DD
+                         arrival_date = datetime.strptime(p_data["arrival_date"], "%Y-%m-%d")
+
+                    payout = Payout(
+                        id=p_data["id"],
+                        status=p_data["status"],
+                        amount_money=amount_money,
+                        created_at=created_at,
+                        arrival_date=arrival_date,
+                        processing_fee=fee_amount,
+                        source="Square" 
+                    )
+                    payouts.append(payout)
+                except (ValidationError, KeyError) as e:
+                    logger.error(f"Error parsing payout {p_data.get('id')}: {e}")
+                    continue
+            
+            cursor = data.get("cursor")
+            if not cursor:
+                break
                 
         return payouts
 

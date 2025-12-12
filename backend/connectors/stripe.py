@@ -3,6 +3,7 @@ try:
     import stripe
 except ImportError:
     stripe = None
+import asyncio
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional
@@ -55,37 +56,45 @@ class StripeClient:
             params["created"]["lte"] = int(end_time.timestamp())
 
         try:
-            # Running sync call in executor to avoid blocking event loop
-            # Real world: usage of stripe.aio or run_in_executor
-            payouts_iter = stripe.Payout.list(**params)
-            
+            # Manual Pagination Loop for Async Safety and Control
             payouts = []
-            for p in payouts_iter.auto_paging_iter():
-                # Stripe amounts are in cents
-                amount = Decimal(p.amount) / 100
+            has_more = True
+            last_id = None
+            
+            while has_more:
+                if last_id:
+                    params["starting_after"] = last_id
                 
-                # Stripe Payouts don't always have the fee directly on the object depending on API version,
-                # usually it's calculated from the balance transactions.
-                # However, for 'paid' payouts, we can try to inspect the balance transactions.
-                # Simplification: We will fetch details later.
+                # We offload the sync call to a thread to avoid blocking the event loop
+                # This is critical for high-volume fetching
+                payouts_page = await asyncio.to_thread(stripe.Payout.list, **params)
                 
-                created_at = datetime.fromtimestamp(p.created)
-                arrival_date = datetime.fromtimestamp(p.arrival_date)
+                if not payouts_page.data:
+                    break
+                    
+                for p in payouts_page.data:
+                    # Stripe amounts are in cents
+                    amount = Decimal(p.amount) / 100
+                    
+                    created_at = datetime.fromtimestamp(p.created)
+                    arrival_date = datetime.fromtimestamp(p.arrival_date)
+                    
+                    payouts.append(Payout(
+                        id=p.id,
+                        status=p.status.upper(),
+                        amount_money=amount,
+                        created_at=created_at,
+                        arrival_date=arrival_date,
+                        currency=p.currency.upper(),
+                        source="Stripe"
+                    ))
+                    
+                    last_id = p.id
                 
-                # Stripe status: 'paid', 'pending', 'in_transit', 'canceled', 'failed'
-                status_map = p.status.upper()
-                
-                payouts.append(Payout(
-                    id=p.id,
-                    status=status_map,
-                    amount_money=amount,
-                    created_at=created_at,
-                    arrival_date=arrival_date,
-                    currency=p.currency.upper(),
-                    source="Stripe"
-                    # processing_fee is 0.00 initially until we fetch details
-                ))
-                
+                has_more = payouts_page.has_more
+                if not has_more:
+                    break
+                    
             return payouts
 
         except stripe.error.StripeError as e:
